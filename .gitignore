@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+.next/
+out/
+
+# secrets — 絕不可提交（CLAUDE.md 禁止事項）
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+service-role*.json
+
+# logs / cache
+*.log
+.vitest/
+coverage/
+.DS_Store
+Thumbs.db

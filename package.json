@@ -1,0 +1,17 @@
+{
+  "name": "money-system",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "台股波段分析與訊號系統（v1 不下單）",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
