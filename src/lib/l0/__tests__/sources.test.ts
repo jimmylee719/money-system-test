@@ -8,15 +8,17 @@ import {
   QUOTE_SOURCES,
   SOURCES_BY_ID,
   TAIFEX_SOURCES,
+  TRADING_STATUS_SOURCES,
 } from '../sources';
 
 describe('來源註冊表', () => {
-  it('包含行情 4 + MOPS 6 + TAIFEX 3 + 籌碼 4 個來源', () => {
+  it('包含行情 4 + MOPS 6 + TAIFEX 3 + 籌碼 4 + 交易狀態 8 個來源', () => {
     expect(QUOTE_SOURCES).toHaveLength(4);
     expect(MOPS_SOURCES).toHaveLength(6);
     expect(TAIFEX_SOURCES).toHaveLength(3);
     expect(CHIP_SOURCES).toHaveLength(4);
-    expect(ALL_SOURCES).toHaveLength(17);
+    expect(TRADING_STATUS_SOURCES).toHaveLength(8);
+    expect(ALL_SOURCES).toHaveLength(25);
   });
 
   it('需要日期參數的來源，其日期提供者必須排在它前面', () => {
@@ -113,8 +115,10 @@ describe('來源註冊表', () => {
   });
 
   it('沒有日期欄位的來源僅限已知的例外', () => {
+    // 這三個的 payload 實測確實沒有日期欄位，不是漏填。
+    // 名單寫死是為了讓「又多一個沒日期的來源」必須經過人看過，不會靜默混進來。
     const noDate = ALL_SOURCES.filter((s) => s.dateField === '').map((s) => s.id);
-    expect(noDate).toEqual(['twse_margin_balance']);
+    expect(noDate).toEqual(['twse_margin_balance', 'twse_suspended', 'twse_altered_trading']);
   });
 
   it('periodField 與 periodFormat 必須成對出現，且欄位存在於基準欄位', () => {
@@ -156,5 +160,31 @@ describe('來源註冊表', () => {
     const tpexProfile = SOURCES_BY_ID.mops_tpex_company_profile;
     expect(tpexProfile.baselineFields).toContain('UnifiedBusinessNo.'); // 結尾帶點
     expect(tpexProfile.baselineFields).toContain('Paidin.Capital.NTDollars');
+
+    const tpexCmode = SOURCES_BY_ID.tpex_altered_trading;
+    expect(tpexCmode.baselineFields).toContain(' FinancialAnnouncements'); // 開頭帶空格
+    expect(tpexCmode.baselineFields).not.toContain('FinancialAnnouncements');
+
+    // 上櫃暫停交易的欄位名中英夾雜，中文欄位照抄
+    const tpexSuspended = SOURCES_BY_ID.tpex_suspended;
+    expect(tpexSuspended.baselineFields).toContain('暫停交易');
+    expect(tpexSuspended.baselineFields).toContain('恢復交易');
+  });
+
+  it('日期格式逐來源宣告，同一交易所也不假設一致', () => {
+    // 2026-08-16 實測：同一批上櫃端點，tpex_suspended 用西元（"20260816"），
+    // tpex_attention 用民國（"1150814"）。若共用格式會解析錯而不報錯。
+    expect(SOURCES_BY_ID.tpex_suspended.dateFormat).toBe('ad_compact');
+    expect(SOURCES_BY_ID.tpex_attention.dateFormat).toBe('roc_compact');
+    expect(SOURCES_BY_ID.tpex_disposition.dateFormat).toBe('roc_compact');
+  });
+
+  it('一次回傳多日公告者用 max，單日快照用 unique', () => {
+    // 實測：處置公告一次回傳近期多日（TWSE 8 個日期、TPEx 9 個日期），
+    // 用 unique 會判定為 multiple_dates_in_payload 而永遠取不到 data_as_of。
+    expect(SOURCES_BY_ID.twse_disposition.dateSelection).toBe('max');
+    expect(SOURCES_BY_ID.tpex_disposition.dateSelection).toBe('max');
+    expect(SOURCES_BY_ID.twse_attention.dateSelection).toBe('unique');
+    expect(SOURCES_BY_ID.tpex_attention.dateSelection).toBe('unique');
   });
 });

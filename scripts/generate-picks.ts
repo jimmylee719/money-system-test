@@ -35,6 +35,20 @@ import {
 import { DailyPicksWriter, buildPickRows } from '../src/lib/l1/picks';
 import type { DailyQuote } from '../src/lib/l1/types';
 import { buildUniverse, mergeUniverses } from '../src/lib/l1/universe';
+import { buildVetoContext, isSameRun } from '../src/lib/l2/context';
+import { applyVetoes } from '../src/lib/l2/engine';
+import { VetoEventWriter, buildVetoRows } from '../src/lib/l2/events';
+import {
+  normalizeTpexAlteredTrading,
+  normalizeTpexAttention,
+  normalizeTpexDisposition,
+  normalizeTpexSuspension,
+  normalizeTwseAlteredTrading,
+  normalizeTwseAttention,
+  normalizeTwseDisposition,
+  normalizeTwseSuspension,
+} from '../src/lib/l2/normalize';
+import { RULE_SPEC_BY_ID } from '../src/lib/l2/rules';
 
 const args = process.argv.slice(2);
 const WRITE = args.includes('--write') || process.env['PICKS_WRITE'] === 'yes';
@@ -232,7 +246,134 @@ console.log(
     `進入排序 ${result.rankedCount} 檔｜五因子全無資料而排除 ${result.excludedNoFactorData} 檔`,
 );
 
+// ── L2 否決層 ────────────────────────────────────────────────────────────────
+//
+// ⚠️ 觀察榜**不受 L2 影響**（CLAUDE.md：觀察榜是研究紀錄，依排名產生）。
+//    那正是衡量 L2 的對照組：被否決的標的照樣有報酬資料可比，
+//    若被擋掉的後續表現持續勝過通過的，就是 L2 在扣分，該砍掉重練。
+//
+// L2 套用在**整個排序池**而不是只有前幾名：全記錄才能回答
+// 「被擋掉的是前段班還是後段班」。擋掉後段班沒什麼，擋掉前段班才是成本。
+const [twseAtt, tpexAtt, twseDisp, tpexDisp, twseSusp, tpexSusp, twseAlt, tpexAlt] =
+  await Promise.all([
+    loader.latest('twse_attention'),
+    loader.latest('tpex_attention'),
+    loader.latest('twse_disposition'),
+    loader.latest('tpex_disposition'),
+    loader.latest('twse_suspended'),
+    loader.latest('tpex_suspended'),
+    loader.latest('twse_altered_trading'),
+    loader.latest('tpex_altered_trading'),
+  ]);
+
+/**
+ * L2 來源的日期認定分三種（實測結果，見 src/lib/l2/context.ts）：
+ *   - 有交易日日期者：必須等於訊號日
+ *   - 滾動視窗（處置公告一次回傳多日）：只要是本次抓取的即可，期間比對交給規則
+ *   - 無日期欄位或當日僅有佔位列：只能以「與行情同一次抓取」判定
+ */
+function l2SourceUsable(
+  snap: typeof twseAtt,
+  label: string,
+  requireSignalDate: boolean,
+): boolean {
+  if (snap === null) {
+    console.log(`  ✗ ${label}：帳本中找不到快照`);
+    return false;
+  }
+  if (!isSameRun(snap.ref, quoteSnap.ref)) {
+    const hours = (Math.abs(Date.parse(snap.ref.fetchedAt) - Date.parse(quoteSnap.ref.fetchedAt)) / 3_600_000).toFixed(1);
+    console.log(`  ✗ ${label}：與行情非同一次抓取（相差 ${hours} 小時）`);
+    return false;
+  }
+  if (requireSignalDate && snap.ref.dataAsOf !== dataAsOf) {
+    console.log(`  ✗ ${label}：data_as_of ${snap.ref.dataAsOf} ≠ 訊號日 ${dataAsOf}`);
+    return false;
+  }
+  return true;
+}
+
+console.log('\n--- L2 否決層資料來源 ---');
+const availability = {
+  attention:
+    l2SourceUsable(twseAtt, 'twse_attention（無公告時僅有佔位列，故不要求日期）', false) &&
+    l2SourceUsable(tpexAtt, 'tpex_attention', true),
+  disposition:
+    l2SourceUsable(twseDisp, 'twse_disposition（滾動視窗）', false) &&
+    l2SourceUsable(tpexDisp, 'tpex_disposition（滾動視窗）', false),
+  suspension:
+    l2SourceUsable(twseSusp, 'twse_suspended（payload 無日期欄位）', false) &&
+    l2SourceUsable(tpexSusp, 'tpex_suspended（日期為日曆日非交易日）', false),
+  alteredTrading:
+    l2SourceUsable(twseAlt, 'twse_altered_trading（payload 無日期欄位）', false) &&
+    l2SourceUsable(tpexAlt, 'tpex_altered_trading', true),
+};
+
+const attentionRows = [
+  ...normalizeTwseAttention(twseAtt?.payload).rows,
+  ...normalizeTpexAttention(tpexAtt?.payload).rows,
+];
+const dispositionRows = [
+  ...normalizeTwseDisposition(twseDisp?.payload).rows,
+  ...normalizeTpexDisposition(tpexDisp?.payload).rows,
+];
+const suspensionRows = [
+  ...normalizeTwseSuspension(twseSusp?.payload).rows,
+  ...normalizeTpexSuspension(tpexSusp?.payload).rows,
+];
+const alteredRows = [
+  ...normalizeTwseAlteredTrading(twseAlt?.payload).rows,
+  ...normalizeTpexAlteredTrading(tpexAlt?.payload).rows,
+];
+
+console.log(
+  `  公告筆數：注意 ${attentionRows.length}｜處置 ${dispositionRows.length}｜` +
+    `暫停 ${suspensionRows.length}｜變更交易 ${alteredRows.length}`,
+);
+
+const vetoResult = applyVetoes(
+  result.ranked,
+  buildVetoContext({
+    signalDate: dataAsOf,
+    attention: attentionRows,
+    disposition: dispositionRows,
+    suspension: suspensionRows,
+    alteredTrading: alteredRows,
+  }),
+  availability,
+);
+
+console.log('\n--- L2 否決結果 ---');
+if (vetoResult.failedClosed) {
+  console.log('✗ 否決所需資料缺漏，依 fail-closed 原則全面否決。');
+  console.log('  這是故障狀態，不是「今天沒訊號」。');
+} else {
+  const vetoedCodes = new Set(vetoResult.vetoed.map((v) => v.code));
+  console.log(
+    `排序池 ${result.ranked.length} 檔 → 通過 ${vetoResult.passed.length} 檔｜` +
+      `被否決 ${vetoedCodes.size} 檔（否決事件 ${vetoResult.vetoed.length} 筆，一檔可能觸發多條）`,
+  );
+  for (const [ruleId, count] of Object.entries(vetoResult.countsByRule)) {
+    const spec = RULE_SPEC_BY_ID.get(ruleId as never);
+    console.log(
+      `  ${ruleId.padEnd(18)} ${String(count).padStart(4)} 檔　把握程度：${spec?.confidence ?? '?'}`,
+    );
+  }
+}
+
 const top = watchlist(result, WATCHLIST_SIZE);
+
+// 最關鍵的一個數字：L2 擋掉的是不是前段班
+const passedCodes = new Set(vetoResult.passed.map((s) => s.code));
+const topVetoed = top.filter((s) => !passedCodes.has(s.code));
+console.log(
+  `\n觀察榜 Top ${top.length} 之中會被 L2 擋下的：${topVetoed.length} 檔` +
+    (topVetoed.length === 0 ? '' : `（${topVetoed.map((s) => s.code).join(', ')}）`),
+);
+for (const decision of vetoResult.vetoed.filter((v) => top.some((s) => s.code === v.code))) {
+  console.log(`  ${decision.code} [${decision.ruleId}] ${decision.reason}`);
+  console.log(`      官方原文：${decision.evidence.slice(0, 120)}`);
+}
 
 console.log(`\n--- 觀察榜 Top ${top.length}（${dataAsOf}）---`);
 console.log('⚠️  這是研究紀錄，不是買進建議。交易訊號須通過 L2 否決與 L3 風控（尚未實作）。\n');
@@ -300,5 +441,17 @@ try {
 }
 
 console.log(`\n✓ 已寫入 daily_picks：${rows.length} 列，run_id ${runId}，revision ${REVISION}`);
-console.log('  append-only，此後不可修改或刪除。');
+
+// 否決紀錄與觀察榜共用同一個 run_id，日後可對照同一次執行的兩份輸出
+const vetoRows = buildVetoRows({
+  result: vetoResult,
+  ranked: result.ranked,
+  runId,
+  dataAsOf,
+  signalAt,
+  engineVersion: result.engineVersion,
+});
+await new VetoEventWriter(registryClient).insert(vetoRows);
+console.log(`✓ 已寫入 veto_events：${vetoRows.length} 筆否決紀錄`);
+console.log('  兩張表皆為 append-only，此後不可修改或刪除。');
 process.exit(0);

@@ -53,6 +53,7 @@ daily_picks     append-only  必含 data_as_of / signal_at / price_at_push
 user_records    你的紀錄（買/賣/觀望/略過/備註），必含 recorded_at
 outcomes        T+5/T+10/T+20 報酬與屏障觸及  ← 僅系統可寫，人工不可改
 turnover_ledger / benchmark_daily / positions
+veto_events     append-only  L2 每筆否決：規則、官方原文、當時名次
 llm_queue / model_registry / llm_results / gold_set
 ```
 **append-only 須上三道鎖，缺一不可，且須實測驗證**（2026-08-16 實測修訂）：

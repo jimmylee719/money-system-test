@@ -17,7 +17,8 @@
     "factors:register": "tsx scripts/register-factors.ts",
     "l1:verify": "tsx scripts/verify-l1-universe.ts",
     "l1:picks": "tsx scripts/generate-picks.ts",
-    "l1:verify-picks": "tsx scripts/verify-picks.ts"
+    "l1:verify-picks": "tsx scripts/verify-picks.ts",
+    "l2:verify": "tsx scripts/verify-veto-events.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

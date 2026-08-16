@@ -29,7 +29,16 @@ export type SourceId =
   | 'twse_institutional_by_stock'
   | 'twse_margin_balance'
   | 'tpex_institutional_by_stock'
-  | 'tpex_margin_balance';
+  | 'tpex_margin_balance'
+  // P6：L2 否決層所需的交易狀態公告
+  | 'twse_attention'
+  | 'twse_disposition'
+  | 'twse_suspended'
+  | 'twse_altered_trading'
+  | 'tpex_attention'
+  | 'tpex_disposition'
+  | 'tpex_suspended'
+  | 'tpex_altered_trading';
 
 /**
  * 來源分級（CLAUDE.md 資料來源優先序）

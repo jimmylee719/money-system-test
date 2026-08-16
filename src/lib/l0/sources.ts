@@ -718,11 +718,273 @@ export const CHIP_SOURCES: readonly SourceDescriptor[] = [
   TPEX_MARGIN_BALANCE,
 ];
 
+// ── P6：L2 否決層所需的交易狀態公告 ─────────────────────────────────────────
+//
+// 全部端點於 2026-08-16 逐一實測回應 200 並記錄實際欄位，欄位名逐字照抄。
+// 實測發現三個非直覺的慣例，寫在這裡是為了讓後人不必再踩一次：
+//
+// 1️⃣ **「當日無公告」不是空陣列，是一列全空的佔位列**
+//    twse_attention 與 tpex_suspended 在無資料時回傳 1 列，
+//    代號為空字串。若把列數當成「有幾檔」，會永遠多算一檔。
+//    L0 只存不判斷，故照原樣存；佔位列的辨識放在 L1 正規化。
+//
+// 2️⃣ **tpex_suspended 的日期是西元壓縮，同組其他端點都是民國**
+//    實測值 "20260816"，而 tpex_attention 同日是 "1150814"。
+//    同一個交易所、同一批端點，格式不一致。故格式逐來源宣告，不共用。
+//
+// 3️⃣ **兩個處置端點的期間格式不同，且都不是標準日期**
+//    TWSE："115/08/12～115/08/18"（斜線 + 全形波浪號）
+//    TPEx："1150817~1150821"（壓縮 + 半形波浪號）
+//    處置是否「現在生效」取決於這個期間，不是取決於公告日，
+//    因此兩種格式都必須解析，不能只挑一種。
+
+export const TWSE_ATTENTION: SourceDescriptor = {
+  id: 'twse_attention',
+  url: 'https://openapi.twse.com.tw/v1/announcement/notice',
+  market: 'TWSE',
+  sourceTier: 'official_primary',
+  description: '集中市場當日公布注意股票',
+  usedBy: 'P6 L2 否決層（注意股）',
+  verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  dateField: 'Date',
+  // ⚠️ 實測當日無注意股（僅佔位列，Date 為空字串），故此端點的日期格式**未能實測**。
+  //    依同一批 TWSE OpenAPI 端點的一致慣例宣告為民國壓縮。
+  //    若實際不是，L0 會記為 date_unparsable 並留在 source_health，不會靜默通過。
+  dateFormat: 'roc_compact',
+  dateSelection: 'unique',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: [
+    'Number',
+    'Code',
+    'Name',
+    'NumberOfAnnouncement',
+    'TradingInfoForAttention',
+    'Date',
+    'ClosingPrice',
+    'PE',
+  ],
+};
+
+/**
+ * 處置股票。一次回傳近期多日的公告（實測 19 列、8 個相異日期），
+ * 故 dateSelection 用 'max'。真正決定「現在是否處置中」的是 DispositionPeriod。
+ */
+export const TWSE_DISPOSITION: SourceDescriptor = {
+  id: 'twse_disposition',
+  url: 'https://openapi.twse.com.tw/v1/announcement/punish',
+  market: 'TWSE',
+  sourceTier: 'official_primary',
+  description: '集中市場公布處置股票',
+  usedBy: 'P6 L2 否決層（處置股）',
+  verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  dateField: 'Date',
+  dateFormat: 'roc_compact',
+  dateSelection: 'max',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: [
+    'Number',
+    'Date',
+    'Code',
+    'Name',
+    'NumberOfAnnouncement',
+    'ReasonsOfDisposition',
+    'DispositionPeriod',
+    'DispositionMeasures',
+    'Detail',
+    'LinkInformation',
+  ],
+};
+
+/** ⚠️ payload 無日期欄位（實測），與 twse_margin_balance 同樣的狀況。 */
+export const TWSE_SUSPENDED: SourceDescriptor = {
+  id: 'twse_suspended',
+  url: 'https://openapi.twse.com.tw/v1/exchangeReport/TWTAWU',
+  market: 'TWSE',
+  sourceTier: 'official_primary',
+  description: '集中市場暫停交易證券',
+  usedBy: 'P6 L2 否決層（暫停交易）',
+  verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  /** 空字串＝此 payload 沒有日期欄位。停復牌日期在 TradingHaltDate / TradingResumptionDate。 */
+  dateField: '',
+  dateFormat: 'roc_compact',
+  dateSelection: 'unique',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: [
+    'Number',
+    'Code',
+    'Name',
+    'TradingHaltDate',
+    'TradingHaltTime',
+    'TradingResumptionDate',
+    'TradingResumptionTime',
+  ],
+};
+
+/**
+ * 變更交易方法（全額交割等）。⚠️ payload 無日期欄位，且**只有三個欄位**：
+ * 列的存在本身即代表該證券變更交易；PeriodicCallAuctionTrading 實測值為
+ * "  "（兩個空格）或 "**"，逐字保留，不解讀成布林值。
+ */
+export const TWSE_ALTERED_TRADING: SourceDescriptor = {
+  id: 'twse_altered_trading',
+  url: 'https://openapi.twse.com.tw/v1/exchangeReport/TWT85U',
+  market: 'TWSE',
+  sourceTier: 'official_primary',
+  description: '集中市場證券變更交易',
+  usedBy: 'P6 L2 否決層（變更交易／全額交割）',
+  verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  dateField: '',
+  dateFormat: 'roc_compact',
+  dateSelection: 'unique',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: ['Code', 'Name', 'PeriodicCallAuctionTrading'],
+};
+
+export const TPEX_ATTENTION: SourceDescriptor = {
+  id: 'tpex_attention',
+  url: 'https://www.tpex.org.tw/openapi/v1/tpex_trading_warning_information',
+  market: 'TPEx',
+  sourceTier: 'official_primary',
+  description: '上櫃公布注意股票資訊',
+  usedBy: 'P6 L2 否決層（注意股）',
+  verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  dateField: 'Date',
+  dateFormat: 'roc_compact',
+  dateSelection: 'unique',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: [
+    'Date',
+    'SecuritiesCompanyCode',
+    'CompanyName',
+    'TradingInformation',
+    'ClosePrice',
+    'PriceEarningRatio',
+  ],
+};
+
+/** 一次回傳近期多日公告（實測 36 列、9 個相異日期），故用 'max'。 */
+export const TPEX_DISPOSITION: SourceDescriptor = {
+  id: 'tpex_disposition',
+  url: 'https://www.tpex.org.tw/openapi/v1/tpex_disposal_information',
+  market: 'TPEx',
+  sourceTier: 'official_primary',
+  description: '上櫃處置有價證券資訊',
+  usedBy: 'P6 L2 否決層（處置股）',
+  verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  dateField: 'Date',
+  dateFormat: 'roc_compact',
+  dateSelection: 'max',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: [
+    'Date',
+    'SecuritiesCompanyCode',
+    'CompanyName',
+    'DispositionPeriod',
+    'DispositionReasons',
+    'DisposalCondition',
+  ],
+};
+
+/**
+ * ⚠️ 兩個實測特例：
+ *   - 日期是**西元**壓縮（"20260816"），與同批其他上櫃端點的民國格式不同
+ *   - 欄位名中英夾雜，「暫停交易」「恢復交易」是中文，照抄
+ */
+export const TPEX_SUSPENDED: SourceDescriptor = {
+  id: 'tpex_suspended',
+  url: 'https://www.tpex.org.tw/openapi/v1/tpex_spendi_today',
+  market: 'TPEx',
+  sourceTier: 'official_primary',
+  description: '上櫃當日公布暫停/恢復交易股票',
+  usedBy: 'P6 L2 否決層（暫停交易）',
+  verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  dateField: 'Date',
+  dateFormat: 'ad_compact',
+  dateSelection: 'unique',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: ['Date', 'SecuritiesCompanyCode', 'CompanyName', '暫停交易', '恢復交易'],
+};
+
+/**
+ * 變更交易／分盤交易／管理股票／停止交易，四種狀態同一張表。
+ * ⚠️ 官方欄位 `" FinancialAnnouncements"` 開頭帶一個空格，照抄不修正。
+ * ⚠️ 旗標值是**全形** Ｙ（U+FF39），不是 ASCII 的 Y。
+ */
+export const TPEX_ALTERED_TRADING: SourceDescriptor = {
+  id: 'tpex_altered_trading',
+  url: 'https://www.tpex.org.tw/openapi/v1/tpex_cmode',
+  market: 'TPEx',
+  sourceTier: 'official_primary',
+  description: '上櫃股票變更交易、分盤交易、管理股票與停止交易資訊',
+  usedBy: 'P6 L2 否決層（變更交易／管理股票／停止交易）',
+  verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  dateField: 'Date',
+  dateFormat: 'roc_compact',
+  dateSelection: 'unique',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: [
+    'Date',
+    'SecuritiesCompanyCode',
+    'CompanyName',
+    'AlteredTrading',
+    'PeriodicTrading',
+    'ManagedStock',
+    'MatchingFrequency',
+    'SuspensionOfTrading',
+    ' FinancialAnnouncements', // 官方欄位名開頭帶一個空格，照抄
+  ],
+};
+
+/** P6 L2 否決層所需的交易狀態公告 */
+export const TRADING_STATUS_SOURCES: readonly SourceDescriptor[] = [
+  TWSE_ATTENTION,
+  TWSE_DISPOSITION,
+  TWSE_SUSPENDED,
+  TWSE_ALTERED_TRADING,
+  TPEX_ATTENTION,
+  TPEX_DISPOSITION,
+  TPEX_SUSPENDED,
+  TPEX_ALTERED_TRADING,
+];
+
 export const ALL_SOURCES: readonly SourceDescriptor[] = [
   ...QUOTE_SOURCES,
   ...MOPS_SOURCES,
   ...TAIFEX_SOURCES,
   ...CHIP_SOURCES,
+  ...TRADING_STATUS_SOURCES,
 ];
 
 export const SOURCES_BY_ID: Readonly<Record<SourceId, SourceDescriptor>> = {
@@ -743,4 +1005,12 @@ export const SOURCES_BY_ID: Readonly<Record<SourceId, SourceDescriptor>> = {
   twse_margin_balance: TWSE_MARGIN_BALANCE,
   tpex_institutional_by_stock: TPEX_INSTITUTIONAL_BY_STOCK,
   tpex_margin_balance: TPEX_MARGIN_BALANCE,
+  twse_attention: TWSE_ATTENTION,
+  twse_disposition: TWSE_DISPOSITION,
+  twse_suspended: TWSE_SUSPENDED,
+  twse_altered_trading: TWSE_ALTERED_TRADING,
+  tpex_attention: TPEX_ATTENTION,
+  tpex_disposition: TPEX_DISPOSITION,
+  tpex_suspended: TPEX_SUSPENDED,
+  tpex_altered_trading: TPEX_ALTERED_TRADING,
 };

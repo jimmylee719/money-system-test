@@ -3,3 +3,5 @@
 {"ran_at":"2026-08-16T04:58:54.343Z","sources":13,"stored":0,"duplicate":13,"failed":0,"drift":0,"data_as_of":["2026-08-14","2026-08-15"]}
 {"ran_at":"2026-08-16T05:34:39.409Z","sources":17,"stored":4,"duplicate":13,"failed":0,"drift":0,"data_as_of":["2026-08-14","2026-08-15"]}
 {"ran_at":"2026-08-16T05:39:27.341Z","sources":17,"stored":0,"duplicate":17,"failed":0,"drift":0,"data_as_of":["2026-08-14","2026-08-15"]}
+{"ran_at":"2026-08-16T06:52:56.318Z","sources":25,"stored":10,"duplicate":15,"failed":0,"drift":0,"data_as_of":["2026-08-14","2026-08-15","2026-08-16"]}
+{"ran_at":"2026-08-16T06:53:42.366Z","sources":25,"stored":0,"duplicate":25,"failed":0,"drift":0,"data_as_of":["2026-08-14","2026-08-15","2026-08-16"]}
