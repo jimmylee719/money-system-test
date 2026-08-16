@@ -23,10 +23,14 @@
     "l3:verify": "tsx scripts/verify-risk-config.ts",
     "l4:verify": "tsx scripts/verify-user-records.ts",
     "l4:sync-secrets": "tsx scripts/sync-line-secrets.ts",
-    "l4:verify-webhook": "tsx scripts/verify-webhook.ts"
+    "l4:verify-webhook": "tsx scripts/verify-webhook.ts",
+    "l5:outcomes": "tsx scripts/compute-outcomes.ts",
+    "l5:verify": "tsx scripts/verify-outcomes.ts",
+    "l5:export": "tsx scripts/export-excel.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "exceljs": "^4.4.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

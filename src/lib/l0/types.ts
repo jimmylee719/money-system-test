@@ -38,7 +38,11 @@ export type SourceId =
   | 'tpex_attention'
   | 'tpex_disposition'
   | 'tpex_suspended'
-  | 'tpex_altered_trading';
+  | 'tpex_altered_trading'
+  // P9：除權息還原（不還原就會系統性低估報酬）
+  | 'twse_exright_forecast'
+  | 'tpex_exright_forecast'
+  | 'tpex_exright_daily';
 
 /**
  * 來源分級（CLAUDE.md 資料來源優先序）

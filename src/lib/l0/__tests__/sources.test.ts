@@ -6,19 +6,21 @@ import {
   CHIP_SOURCES,
   MOPS_SOURCES,
   QUOTE_SOURCES,
+  EXRIGHT_SOURCES,
   SOURCES_BY_ID,
   TAIFEX_SOURCES,
   TRADING_STATUS_SOURCES,
 } from '../sources';
 
 describe('來源註冊表', () => {
-  it('包含行情 4 + MOPS 6 + TAIFEX 3 + 籌碼 4 + 交易狀態 8 個來源', () => {
+  it('包含行情 4 + MOPS 6 + TAIFEX 3 + 籌碼 4 + 交易狀態 8 + 除權息 3 個來源', () => {
     expect(QUOTE_SOURCES).toHaveLength(4);
     expect(MOPS_SOURCES).toHaveLength(6);
     expect(TAIFEX_SOURCES).toHaveLength(3);
     expect(CHIP_SOURCES).toHaveLength(4);
     expect(TRADING_STATUS_SOURCES).toHaveLength(8);
-    expect(ALL_SOURCES).toHaveLength(25);
+    expect(EXRIGHT_SOURCES).toHaveLength(3);
+    expect(ALL_SOURCES).toHaveLength(28);
   });
 
   it('需要日期參數的來源，其日期提供者必須排在它前面', () => {
@@ -169,6 +171,32 @@ describe('來源註冊表', () => {
     const tpexSuspended = SOURCES_BY_ID.tpex_suspended;
     expect(tpexSuspended.baselineFields).toContain('暫停交易');
     expect(tpexSuspended.baselineFields).toContain('恢復交易');
+
+    // 上市除權息預告表：Exdividend 是小寫 d
+    const twseEx = SOURCES_BY_ID.twse_exright_forecast;
+    expect(twseEx.baselineFields).toContain('Exdividend');
+    expect(twseEx.baselineFields).not.toContain('ExDividend');
+
+    // 上櫃除權息預告表：日期欄位是 ExRrightsExDividendDate（Rrights 兩個 r）
+    const tpexEx = SOURCES_BY_ID.tpex_exright_forecast;
+    expect(tpexEx.dateField).toBe('ExRrightsExDividendDate');
+    expect(tpexEx.baselineFields).toContain('ExRrightsExDividendDate');
+
+    // 上櫃除權息計算結果：Diviend / Divdend 兩種不同的拼錯，且兩個都存在
+    const tpexDaily = SOURCES_BY_ID.tpex_exright_daily;
+    expect(tpexDaily.baselineFields).toContain('ExRightsDiviend');
+    expect(tpexDaily.baselineFields).toContain('CashDivdend');
+    expect(tpexDaily.baselineFields).toContain('CashDividend');
+    expect(tpexDaily.baselineFields).toContain('StockDivdendThousandShares');
+  });
+
+  it('除權息預告表一次回傳多個除權息日，必須用 max', () => {
+    // 實測：上市 142 列 23 個日期、上櫃 157 列多個日期。
+    // 用 unique 會判定為 multiple_dates_in_payload 而永遠取不到 data_as_of。
+    expect(SOURCES_BY_ID.twse_exright_forecast.dateSelection).toBe('max');
+    expect(SOURCES_BY_ID.tpex_exright_forecast.dateSelection).toBe('max');
+    // 計算結果表只有當日，用 unique
+    expect(SOURCES_BY_ID.tpex_exright_daily.dateSelection).toBe('unique');
   });
 
   it('日期格式逐來源宣告，同一交易所也不假設一致', () => {

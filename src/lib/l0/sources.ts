@@ -979,12 +979,157 @@ export const TRADING_STATUS_SOURCES: readonly SourceDescriptor[] = [
   TPEX_ALTERED_TRADING,
 ];
 
+// ── P9：除權息（報酬還原用） ─────────────────────────────────────────────────
+//
+// CLAUDE.md：「P9 計算報酬時必須把除權息還原，丟掉這個欄位會低估報酬」。
+// 台股除權息集中在 7–9 月，不還原會系統性低估整個旺季的報酬，
+// 那會直接影響 G2（期望值、獲利因子）與 G3（勝過 0050）的判定。
+//
+// 【2026-08-16 實測：兩個交易所的「預告表」單位一致，但「計算結果表」不同】
+//   上市 TWT48U_ALL        StockDividendRatio        0.10000000   每股配股率
+//   上櫃 exright_prepost   StockDividendRatio        0.04990554   每股配股率　← 同單位
+//   上櫃 exright_daily     StockDividend             1.547368     權值（元）　← **是金額不是比率**
+//                          StockDivdendThousandShares 49.90554083  每千股配股數
+// 以官方參考價反推驗證（4123 晟德）：
+//   (34.30 − 1.74669) ÷ (1 + 0.0499055) = 31.0059，官方參考價 31.01 ✓
+// 若誤把 exright_daily 的 StockDividend 當成配股率，會算出 12.78 —— 差了兩倍以上。
+//
+// 【為什麼預告表必須每日抓】
+// 預告表是**前瞻**的：它列出即將到來的除權息日。過去的除權息會從表中消失。
+// 因為 L0 是 append-only 且每日抓取，各日快照的**聯集**才涵蓋所有除權息事件。
+// 少抓一天，那天新增的除權息就可能永遠補不回來（交易所不提供歷史查詢）。
+
+export const TWSE_EXRIGHT_FORECAST: SourceDescriptor = {
+  id: 'twse_exright_forecast',
+  url: 'https://openapi.twse.com.tw/v1/exchangeReport/TWT48U_ALL',
+  market: 'TWSE',
+  sourceTier: 'official_primary',
+  description: '上市股票除權除息預告表',
+  usedBy: 'P9 報酬還原（除權息）',
+  verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  dateField: 'Date',
+  dateFormat: 'roc_compact',
+  // 一次回傳未來多個除權息日（實測 142 列、23 個相異日期）
+  dateSelection: 'max',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: [
+    'Date',
+    'Code',
+    'Name',
+    'Exdividend', // 官方拼法：小寫 d，非 ExDividend。值為 息／權／權息
+    'StockDividendRatio',
+    'SubscriptionRatio',
+    'SubscriptionPricePerShare',
+    'CashDividend',
+    'SharesOffered',
+    'SharesEmpOwner',
+    'SharesholderOwner',
+    'StockHoldingRatio',
+  ],
+};
+
+/** ⚠️ 日期欄位是 `ExRrightsExDividendDate`（官方拼法，Rrights 有兩個 r），不是 Date。 */
+export const TPEX_EXRIGHT_FORECAST: SourceDescriptor = {
+  id: 'tpex_exright_forecast',
+  url: 'https://www.tpex.org.tw/openapi/v1/tpex_exright_prepost',
+  market: 'TPEx',
+  sourceTier: 'official_primary',
+  description: '上櫃股票除權除息預告表',
+  usedBy: 'P9 報酬還原（除權息）',
+  verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  dateField: 'ExRrightsExDividendDate',
+  dateFormat: 'roc_compact',
+  dateSelection: 'max',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: [
+    'ExRrightsExDividendDate',
+    'SecuritiesCompanyCode',
+    'CompanyName',
+    'ExRrightsExDividend',
+    'StockDividendRatio',
+    'SubscriptionRatioToNewSharesIssued',
+    'SubscriptionPricePerShare',
+    'CashDividend',
+    'AllocatedForPublicUnderwriting',
+    'SubscribedByEmployees',
+    'SubscribedByExistingShareholders',
+    'SubscribedProRataInThousandShares',
+  ],
+};
+
+/**
+ * 上櫃除權息計算結果表。**用途是交叉驗證，不是主要資料來源。**
+ *
+ * 它同時提供除權息前收盤價與官方參考價，因此可以拿來反推、確認我們的
+ * 還原公式沒有算錯。上市在 OpenAPI 目錄查無對應端點，故此交叉驗證僅涵蓋上櫃。
+ *
+ * ⚠️ 官方欄位有多處拼寫錯誤，一律照抄：
+ *    `ExRightsDiviend`（Diviend）／`CashDivdend`（Divdend）／`StockDivdendThousandShares`
+ *    且 `CashDividend` 與 `CashDivdend` **兩個都存在**，精度不同。
+ */
+export const TPEX_EXRIGHT_DAILY: SourceDescriptor = {
+  id: 'tpex_exright_daily',
+  url: 'https://www.tpex.org.tw/openapi/v1/tpex_exright_daily',
+  market: 'TPEx',
+  sourceTier: 'official_primary',
+  description: '上櫃股票除權除息計算結果表（交叉驗證用）',
+  usedBy: 'P9 報酬還原的公式交叉驗證',
+  verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  dateField: 'Date',
+  dateFormat: 'roc_compact',
+  dateSelection: 'unique',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: [
+    'Date',
+    'SecuritiesCompanyCode',
+    'CompanyName',
+    'ClosePriceBeforeExRightsDiviend',
+    'ExRightsDiviendQuote',
+    'StockDividend',
+    'CashDividend',
+    'StockDividendPlusCashDividend',
+    'ExRightsDiviend',
+    'LimitUp',
+    'LimitDown',
+    'OpeningReferencePrice',
+    'DividendDeductedQuote',
+    'CashDivdend',
+    'StockDivdendThousandShares',
+    'CashCapitalIncreaseShares',
+    'SubscriptionPricePerShare',
+    'AllocatedForPublicUnderwriting',
+    'SubscribedByEmployees',
+    'SubscribedByExistingShareholders',
+    'SubscribedProRataThousandShares',
+  ],
+};
+
+/** P9 除權息 */
+export const EXRIGHT_SOURCES: readonly SourceDescriptor[] = [
+  TWSE_EXRIGHT_FORECAST,
+  TPEX_EXRIGHT_FORECAST,
+  TPEX_EXRIGHT_DAILY,
+];
+
 export const ALL_SOURCES: readonly SourceDescriptor[] = [
   ...QUOTE_SOURCES,
   ...MOPS_SOURCES,
   ...TAIFEX_SOURCES,
   ...CHIP_SOURCES,
   ...TRADING_STATUS_SOURCES,
+  ...EXRIGHT_SOURCES,
 ];
 
 export const SOURCES_BY_ID: Readonly<Record<SourceId, SourceDescriptor>> = {
@@ -1013,4 +1158,7 @@ export const SOURCES_BY_ID: Readonly<Record<SourceId, SourceDescriptor>> = {
   tpex_disposition: TPEX_DISPOSITION,
   tpex_suspended: TPEX_SUSPENDED,
   tpex_altered_trading: TPEX_ALTERED_TRADING,
+  twse_exright_forecast: TWSE_EXRIGHT_FORECAST,
+  tpex_exright_forecast: TPEX_EXRIGHT_FORECAST,
+  tpex_exright_daily: TPEX_EXRIGHT_DAILY,
 };
