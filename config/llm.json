@@ -1,0 +1,24 @@
+{
+  "_說明": [
+    "P11 本機 LLM 設定。這個檔案進版控，因此任何調整都會留在 git 記錄裡——",
+    "「悄悄換一個模型」在這裡做不到。",
+    "endpoint 只准本機（127.0.0.1 / localhost / [::1]），程式與資料庫都會擋外部網址。",
+    "這裡不放也不需要任何金鑰：本機 runtime 不需要金鑰，本專案零 AI API 支出。"
+  ],
+  "_enabled說明": [
+    "整層 LLM 否決的總開關。預設 false，因為還沒有任何模型考過 gold_set。",
+    "就算改成 true，沒有 champion（model_registry 裡沒有帶成績的 champion 列）",
+    "一樣不會有任何否決發生——開關只是讓你能在不動資料庫的情況下整層關掉。"
+  ],
+  "enabled": false,
+  "_challenger說明": [
+    "要參加評測的挑戰者。跑 `npm run llm:eval` 時用的就是這個。",
+    "modelKey 照抄 runtime 顯示的名稱（例如 `ollama list` 那一欄），不要美化。",
+    "Ollama 預設埠 11434、LM Studio 預設埠 1234。"
+  ],
+  "challenger": {
+    "modelKey": "qwen2.5:7b-instruct",
+    "provider": "ollama",
+    "endpoint": "http://127.0.0.1:11434/v1"
+  }
+}

@@ -1,0 +1,142 @@
+/**
+ * P11 — 模型呼叫抽象層。走 OpenAI 相容的 `/chat/completions`。
+ *
+ * 【設定檔驅動，不寫死廠商】（CLAUDE.md：Provider 抽象層走設定檔）
+ * Ollama 與 LM Studio 都提供 OpenAI 相容端點，因此這裡只需要一種實作，
+ * 換 runtime 只是換 `endpoint` 與 `modelKey` 兩個字串。
+ *
+ * 【不帶任何金鑰，這是刻意的】
+ * 本機 runtime 不需要金鑰。這裡也**沒有**讀取金鑰的程式碼，
+ * 於是「不小心把請求送到要付費的 API」在結構上就不會成立：
+ * 端點被 `assertLocalEndpoint` 限制在 127.0.0.1 / localhost，
+ * 就算填了外部網址也會在送出前被擋下。
+ * 對應 CLAUDE.md：❌ 不設 ANTHROPIC_API_KEY，本專案零 AI API 支出。
+ *
+ * ⚠️ **未實測聲明**：本機（2026-08-16）未安裝 Ollama 或 LM Studio，
+ *    因此「這段程式能對真實 Ollama 取得回應」尚未經過實測。
+ *    已實測的是：端點白名單、請求組裝、逾時、錯誤處理、回應解析（皆以假的 fetch 驗證）。
+ *    真實連通性請用 `npm run llm:check` 自行驗證，它只會回報連得上與否，不寫任何資料。
+ */
+
+import { INFERENCE_PARAMS } from './prompt';
+import type { ModelSpec } from './types';
+import { assertLocalEndpoint } from './types';
+
+/** 單次呼叫的逾時。本機 7B 模型讀一則長公告，數十秒是正常的 */
+export const DEFAULT_TIMEOUT_MS = 120_000;
+
+export interface CompletionResult {
+  readonly content: string;
+  readonly latencyMs: number;
+}
+
+export class LlmProviderError extends Error {
+  readonly status: number | null;
+
+  constructor(message: string, status: number | null) {
+    super(message);
+    this.name = 'LlmProviderError';
+    this.status = status;
+  }
+}
+
+/** 一次對話補全。回傳原始文字，不做任何解析——解析是 verdict.ts 的事 */
+export interface ChatProvider {
+  complete(system: string, user: string): Promise<CompletionResult>;
+}
+
+interface ChatChoice {
+  readonly message?: { readonly content?: unknown };
+}
+
+export class OpenAiCompatibleProvider implements ChatProvider {
+  readonly #spec: ModelSpec;
+  readonly #fetch: typeof fetch;
+  readonly #timeoutMs: number;
+  readonly #now: () => number;
+
+  constructor(
+    spec: ModelSpec,
+    options: {
+      readonly fetchImpl?: typeof fetch;
+      readonly timeoutMs?: number;
+      readonly now?: () => number;
+    } = {},
+  ) {
+    // 端點在建構時就檢查，而不是等到送出請求才檢查——
+    // 錯的設定要在還沒對外連線之前就失敗。
+    assertLocalEndpoint(spec.endpoint);
+    this.#spec = spec;
+    this.#fetch = options.fetchImpl ?? fetch;
+    this.#timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.#now = options.now ?? Date.now;
+  }
+
+  get url(): string {
+    return `${this.#spec.endpoint.replace(/\/+$/, '')}/chat/completions`;
+  }
+
+  async complete(system: string, user: string): Promise<CompletionResult> {
+    const started = this.#now();
+    let res: Response;
+    try {
+      res = await this.#fetch(this.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: this.#spec.modelKey,
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: user },
+          ],
+          stream: false,
+          ...INFERENCE_PARAMS,
+        }),
+        signal: AbortSignal.timeout(this.#timeoutMs),
+      });
+    } catch (error) {
+      throw new LlmProviderError(
+        `連不上本機模型端點 ${this.url}：${(error as Error).message}。` +
+          '請確認 runtime 已啟動（Ollama 預設 11434、LM Studio 預設 1234）。',
+        null,
+      );
+    }
+
+    if (!res.ok) {
+      throw new LlmProviderError(
+        `模型端點回應 HTTP ${res.status}：${(await res.text()).slice(0, 200)}`,
+        res.status,
+      );
+    }
+
+    const body = (await res.json()) as { choices?: readonly ChatChoice[] };
+    const content = body.choices?.[0]?.message?.content;
+    if (typeof content !== 'string') {
+      throw new LlmProviderError('模型回應缺少 choices[0].message.content', res.status);
+    }
+    return { content, latencyMs: this.#now() - started };
+  }
+}
+
+/**
+ * 假的 provider。給測試與 `--dry-run` 用，讓整條管線在沒有安裝任何 runtime 時
+ * 仍然可以跑完並被驗證。
+ *
+ * ⚠️ 它**永遠回 no_veto**，因為一個假模型不該有能力否決任何東西。
+ */
+export class StubProvider implements ChatProvider {
+  readonly #responses: readonly string[];
+  #index = 0;
+
+  constructor(responses: readonly string[] = []) {
+    this.#responses = responses;
+  }
+
+  complete(): Promise<CompletionResult> {
+    const canned =
+      this.#responses[this.#index] ??
+      JSON.stringify({ verdict: 'no_veto', quote: '', reason: 'stub provider，未實際推論' });
+    this.#index += 1;
+    return Promise.resolve({ content: canned, latencyMs: 0 });
+  }
+}

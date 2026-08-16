@@ -61,6 +61,17 @@ export const RULE_SPECS: readonly VetoRuleSpec[] = [
     confidence: 'suspected',
   },
   {
+    id: 'llm_material_news',
+    displayName: '重大訊息負面事件（本機 LLM 判讀）',
+    rationale:
+      '本機模型讀重大訊息原文，判斷有無已發生的具體不利事實。' +
+      '否決時必須逐字引用原文，引用在原文中找不到即作廢改判不否決——' +
+      '幻覺不得構成否決依據。這條是所有規則裡把握程度最低的：' +
+      '它依據的是模型對文字的判讀而非交易所公告的事實，不可回測，' +
+      '因此獨立記錄、獨立衡量，並且可以單獨關閉。',
+    confidence: 'suspected',
+  },
+  {
     id: 'source_unavailable',
     displayName: '否決所需資料缺漏（fail-closed）',
     rationale:

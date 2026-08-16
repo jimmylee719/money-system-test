@@ -28,6 +28,12 @@
     "l5:verify": "tsx scripts/verify-outcomes.ts",
     "l5:export": "tsx scripts/export-excel.ts",
     "l6:g3": "tsx scripts/g3-report.ts",
+    "llm:verify": "tsx scripts/verify-llm.ts",
+    "llm:check": "tsx scripts/llm-worker.ts --check",
+    "llm:enqueue": "tsx scripts/llm-enqueue.ts",
+    "llm:worker": "tsx scripts/llm-worker.ts",
+    "llm:gold": "tsx scripts/llm-gold.ts",
+    "llm:eval": "tsx scripts/llm-eval.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start"

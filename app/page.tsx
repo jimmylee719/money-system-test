@@ -261,6 +261,48 @@ export default async function Page() {
         )}
       </Section>
 
+      {/* ── L2b：本機 LLM ── */}
+      <Section
+        title="L2b：本機 LLM 否決（選配）"
+        note="讀重大訊息原文判斷有無已發生的負面事實。只能否決，資料層無法表達買進訊號。判否決必須引用原文，引用在原文中找不到即作廢。"
+      >
+        {data.llm.missing ? (
+          <p className="text-sm text-neutral-400">尚未建立 llm_queue（0012 migration 未執行）。</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <Stat
+                label="現役模型"
+                value={data.llm.championModel === null ? '無' : '有'}
+                hint={data.llm.championModel ?? '沒有模型考過 gold_set，此層未上線'}
+              />
+              <Stat
+                label="公告佇列"
+                value={String(data.llm.queueTotal)}
+                hint={`已判 ${data.llm.judgedTotal}`}
+              />
+              <Stat
+                label="未判"
+                value={String(Math.max(0, data.llm.queueTotal - data.llm.judgedTotal))}
+                hint="worker 未跑完；未判不會產生否決"
+              />
+              <Stat
+                label="gold_set"
+                value={`${data.llm.goldTotal}`}
+                hint={`其中應否決 ${data.llm.goldVetoLabels}　需 ≥30 才能評測`}
+              />
+            </div>
+            {data.llm.queueTotal > data.llm.judgedTotal && (
+              <p className="mt-3 text-sm text-amber-200">
+                ⚠️ 有 {data.llm.queueTotal - data.llm.judgedTotal} 則公告尚未判定。
+                這一層不 fail-closed（不會因為沒判完就全部擋掉），
+                所以未判的公告等於今天少擋了——這個數字就是那個缺口。
+              </p>
+            )}
+          </>
+        )}
+      </Section>
+
       {/* ── 閘門進度 ── */}
       <Section title="自動下單解鎖閘門" note="五道全部通過才進 v2。目前 v1 不具備任何下單功能。">
         <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">

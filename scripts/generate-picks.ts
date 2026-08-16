@@ -55,6 +55,9 @@ import {
   normalizeTwseDisposition,
   normalizeTwseSuspension,
 } from '../src/lib/l2/normalize';
+import { applyLlmVetoes } from '../src/lib/l2/llm/apply';
+import type { LlmVetoOutcome } from '../src/lib/l2/llm/apply';
+import { loadLlmConfig } from '../src/lib/l2/llm/config';
 import { RULE_SPEC_BY_ID } from '../src/lib/l2/rules';
 import { ACTIVE_RISK_CONFIG } from '../src/lib/l3/config';
 import { applyRiskLimits } from '../src/lib/l3/engine';
@@ -376,6 +379,131 @@ console.log(
     `暫停 ${suspensionRows.length}｜變更交易 ${alteredRows.length}`,
 );
 
+/**
+ * P11 L2b — 套用本機 LLM 的否決結果。
+ *
+ * 回傳 null 代表「這一層今天沒有參與」，可能是：
+ * 總開關關著／沒有 champion／資料表還沒建立／查詢失敗。
+ * 四種情況都會印出來，不會安靜地跳過。
+ *
+ * ⚠️ 這裡**不呼叫模型**，只讀 worker 事先算好寫進 llm_results 的結果。
+ */
+async function applyLlmLayer<T extends { readonly code: string }>(
+  candidates: readonly T[],
+  signalDate: string,
+): Promise<LlmVetoOutcome<T> | null> {
+  let llmConfig;
+  try {
+    llmConfig = loadLlmConfig();
+  } catch (error) {
+    console.log(`\n--- L2b LLM 否決 ---\n未參與：讀不到 config/llm.json（${String(error).slice(0, 80)}）`);
+    return null;
+  }
+  if (!llmConfig.enabled) {
+    console.log('\n--- L2b LLM 否決 ---\n未參與：config/llm.json 的 enabled 為 false（總開關關閉）');
+    return null;
+  }
+
+  async function get<R>(query: string): Promise<readonly R[] | null> {
+    const res = await fetch(`${config.url}/rest/v1/${query}`, {
+      headers: { apikey: config.serviceRoleKey, Authorization: `Bearer ${config.serviceRoleKey}` },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) {
+      console.log(`\n--- L2b LLM 否決 ---\n未參與：查詢失敗 HTTP ${res.status}（0012 migration 執行了嗎？）`);
+      return null;
+    }
+    return (await res.json()) as readonly R[];
+  }
+
+  const champions = await get<{ id: number; model_key: string; prompt_version: string }>(
+    'model_registry?role=eq.champion&model_key=not.like.__probe*&select=id,model_key,prompt_version' +
+      '&order=registered_at.desc&limit=1',
+  );
+  if (champions === null) return null;
+  const champion = champions[0];
+  if (champion === undefined) {
+    console.log('\n--- L2b LLM 否決 ---\n未參與：沒有任何 champion（沒有模型考過 gold_set）。這是禁止熱抽換的預期狀態。');
+    return null;
+  }
+
+  const queued = await get<{
+    task_key: string;
+    code: string;
+    market: string;
+    speak_date: string;
+    clause: string;
+    subject: string;
+    detail: string;
+    content_hash: string;
+    source_id: string;
+  }>(`llm_queue?data_as_of=eq.${signalDate}&task_key=not.like.__probe*&select=*&limit=5000`);
+  if (queued === null) return null;
+
+  const resultRows = await get<{
+    task_key: string;
+    verdict: string;
+    quoted_evidence: string;
+    evidence_verified: boolean;
+    parse_ok: boolean;
+    reason: string;
+  }>(`llm_results?model_registry_id=eq.${champion.id}&select=*&limit=5000`);
+  if (resultRows === null) return null;
+
+  const verdictsByTaskKey = new Map(
+    resultRows.map((r) => [
+      r.task_key,
+      {
+        taskKey: r.task_key,
+        verdict: r.verdict as 'veto' | 'no_veto',
+        quotedEvidence: r.quoted_evidence,
+        evidenceVerified: r.evidence_verified,
+        parseOk: r.parse_ok,
+        reason: r.reason,
+        rawResponse: '',
+        latencyMs: 0,
+      },
+    ]),
+  );
+
+  const outcome = applyLlmVetoes(candidates, {
+    tasks: queued.map((q) => ({
+      taskKey: q.task_key,
+      dataAsOf: signalDate,
+      sourceId: q.source_id,
+      code: q.code,
+      market: q.market as 'TWSE' | 'TPEx',
+      speakDate: q.speak_date,
+      clause: q.clause,
+      subject: q.subject,
+      detail: q.detail,
+      contentHash: q.content_hash,
+      itemKey: q.task_key,
+    })),
+    verdictsByTaskKey,
+    modelKey: champion.model_key,
+    promptVersion: champion.prompt_version,
+  });
+
+  console.log('\n--- L2b LLM 否決 ---');
+  console.log(`模型 ${champion.model_key}｜當日佇列 ${queued.length} 則公告`);
+  console.log(
+    `通過 ${candidates.length} → ${outcome.passed.length} 檔｜否決 ${outcome.vetoed.length} 檔`,
+  );
+  if (outcome.pendingTasks > 0) {
+    console.log(
+      `⚠️ 有 ${outcome.pendingTasks} 則公告還沒判（worker 沒跑完）。` +
+        '這一層今天是不完整的，未判的公告不會產生否決。',
+    );
+  }
+  if (outcome.parseFailures > 0 || outcome.evidenceFailures > 0) {
+    console.log(
+      `　　解析失敗 ${outcome.parseFailures} 則、判否決但引用在原文中找不到而作廢 ${outcome.evidenceFailures} 則`,
+    );
+  }
+  return outcome;
+}
+
 const vetoResult = applyVetoes(
   result.ranked,
   buildVetoContext({
@@ -406,16 +534,35 @@ if (vetoResult.failedClosed) {
   }
 }
 
+// ── L2b：本機 LLM 否決（P11，選配）────────────────────────────────────────────
+//
+// 這一層**只讀資料庫裡已經算好的結果**，不在這裡呼叫任何模型。
+// 排程跑在 GitHub Actions 上，那裡沒有、也不該有本機模型；
+// 判定是本機 worker 事先跑好寫進 llm_results 的。
+//
+// 沒有結果就維持原狀，不 fail-closed——理由寫在 src/lib/l2/llm/apply.ts。
+const llmOutcome = await applyLlmLayer(vetoResult.passed, dataAsOf);
+
+const l2Result =
+  llmOutcome === null
+    ? vetoResult
+    : {
+        passed: llmOutcome.passed,
+        vetoed: [...vetoResult.vetoed, ...llmOutcome.vetoed],
+        countsByRule: { ...vetoResult.countsByRule, ...llmOutcome.countsByRule },
+        failedClosed: vetoResult.failedClosed,
+      };
+
 const top = watchlist(result, WATCHLIST_SIZE);
 
 // 最關鍵的一個數字：L2 擋掉的是不是前段班
-const passedCodes = new Set(vetoResult.passed.map((s) => s.code));
+const passedCodes = new Set(l2Result.passed.map((s) => s.code));
 const topVetoed = top.filter((s) => !passedCodes.has(s.code));
 console.log(
   `\n觀察榜 Top ${top.length} 之中會被 L2 擋下的：${topVetoed.length} 檔` +
     (topVetoed.length === 0 ? '' : `（${topVetoed.map((s) => s.code).join(', ')}）`),
 );
-for (const decision of vetoResult.vetoed.filter((v) => top.some((s) => s.code === v.code))) {
+for (const decision of l2Result.vetoed.filter((v) => top.some((s) => s.code === v.code))) {
   console.log(`  ${decision.code} [${decision.ruleId}] ${decision.reason}`);
   console.log(`      官方原文：${decision.evidence.slice(0, 120)}`);
 }
@@ -467,7 +614,7 @@ const entriesThisMonth = await (async (): Promise<number> => {
 // ⚠️ v1 不下單，尚無實際部位與淨值，故持倉數與回撤傳 0。
 //    熔斷規則已實作並測試，但要等 P9 有 outcomes 之後才真正生效。
 const riskResult = applyRiskLimits(
-  vetoResult.passed,
+  l2Result.passed,
   {
     signalDate: dataAsOf,
     volatilityByCode,
@@ -489,7 +636,7 @@ if (riskResult.haltedGlobally) {
   console.log('  當日一律 0 檔，沒有例外。');
 } else {
   console.log(
-    `L2 通過 ${vetoResult.passed.length} 檔 → L3 核准 ${riskResult.approved.length} 檔`,
+    `L2 通過 ${l2Result.passed.length} 檔 → L3 核准 ${riskResult.approved.length} 檔`,
   );
   const order: string[] = Object.keys(riskResult.countsByReason).sort(
     (a, b) => (riskResult.countsByReason[b] ?? 0) - (riskResult.countsByReason[a] ?? 0),
@@ -567,7 +714,7 @@ const reportText = buildDailyReport({
   dataAsOf,
   ranking: result,
   watchlist: top,
-  veto: vetoResult,
+  veto: l2Result,
   risk: riskResult,
   historyDays: history.length,
   volMinObservations: ACTIVE_RISK_CONFIG.volMinObservations,
@@ -636,7 +783,7 @@ console.log(`\n✓ 已寫入 daily_picks：${rows.length} 列，run_id ${runId}�
 
 // 否決紀錄與觀察榜共用同一個 run_id，日後可對照同一次執行的兩份輸出
 const vetoRows = buildVetoRows({
-  result: vetoResult,
+  result: l2Result,
   ranked: result.ranked,
   runId,
   dataAsOf,

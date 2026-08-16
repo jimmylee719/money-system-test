@@ -18,6 +18,7 @@ const PROBE_FILTERS = {
   outcomes: 'pick_id=lt.900000000',
   benchmark: 'code=eq.0050',
   userRecords: 'line_message_id=not.like.__probe*',
+  llm: 'task_key=not.like.__probe*',
 } as const;
 
 export interface QueryResult<T> {
@@ -91,6 +92,22 @@ export interface BenchmarkRow {
   readonly total_return_index: string;
 }
 
+/**
+ * P11 LLM 層的狀態。
+ *
+ * 「佇列裡有幾則還沒判」必須看得見：那一層沒跑完時不會 fail-closed，
+ * 也就是說它會安靜地少擋一些東西。安靜的洞要在畫面上補成一個數字。
+ */
+export interface LlmStatus {
+  readonly missing: boolean;
+  readonly championModel: string | null;
+  readonly queueTotal: number;
+  readonly judgedTotal: number;
+  readonly vetoTotal: number;
+  readonly goldTotal: number;
+  readonly goldVetoLabels: number;
+}
+
 export interface DashboardData {
   readonly latestDate: string | null;
   readonly picks: QueryResult<PickRow>;
@@ -101,6 +118,7 @@ export interface DashboardData {
   readonly tradeSignalTotal: number;
   readonly factorCount: number;
   readonly riskConfigVersion: string | null;
+  readonly llm: LlmStatus;
 }
 
 export async function loadDashboard(): Promise<DashboardData> {
@@ -160,6 +178,20 @@ export async function loadDashboard(): Promise<DashboardData> {
       query<{ version: string }>('risk_config?select=version&order=registered_at.desc&limit=1'),
     ]);
 
+  const [champion, llmQueue, llmResults, goldRows] = await Promise.all([
+    query<{ model_key: string }>(
+      'model_registry?role=eq.champion&model_key=not.like.__probe*' +
+        '&select=model_key&order=registered_at.desc&limit=1',
+    ),
+    query<{ task_key: string }>(`llm_queue?${PROBE_FILTERS.llm}&select=task_key`),
+    query<{ task_key: string; verdict: string }>(
+      `llm_results?${PROBE_FILTERS.llm}&select=task_key,verdict`,
+    ),
+    query<{ item_key: string; label: string }>(
+      'gold_set?item_key=not.like.__probe*&select=item_key,label',
+    ),
+  ]);
+
   return {
     latestDate,
     picks,
@@ -170,5 +202,15 @@ export async function loadDashboard(): Promise<DashboardData> {
     tradeSignalTotal: new Set(allSignals.rows.map((s) => `${s.data_as_of}|${s.code}`)).size,
     factorCount: factors.rows.length,
     riskConfigVersion: risk.rows[0]?.version ?? null,
+    llm: {
+      missing: llmQueue.missing,
+      championModel: champion.rows[0]?.model_key ?? null,
+      queueTotal: llmQueue.rows.length,
+      // 同一則公告若被多個模型判過，只算一則已判
+      judgedTotal: new Set(llmResults.rows.map((r) => r.task_key)).size,
+      vetoTotal: llmResults.rows.filter((r) => r.verdict === 'veto').length,
+      goldTotal: new Set(goldRows.rows.map((r) => r.item_key)).size,
+      goldVetoLabels: goldRows.rows.filter((r) => r.label === 'veto').length,
+    },
   };
 }

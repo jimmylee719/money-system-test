@@ -34,3 +34,4 @@ exports/
 .next/
 next-env.d.ts
 *.tsbuildinfo
+gold/
