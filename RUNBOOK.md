@@ -127,14 +127,33 @@ npm run llm:check
 
 連不上會告訴你原因，不會有任何副作用（不讀不寫任何資料）。
 
-沒裝的話：到 <https://ollama.com/download> 下載 Windows 版，安裝後開一個終端機跑
+沒裝的話：到 <https://ollama.com/download> 下載 Windows 版，
+執行 `OllamaSetup.exe`（安裝在使用者目錄，不需要系統管理員權限），
+裝完會自動在背景啟動並在右下角出現圖示，監聽 `127.0.0.1:11434`。
+
+**開一個新的終端機**（PATH 要重讀才吃得到 `ollama` 指令）：
 
 ```bash
-ollama pull qwen2.5:7b-instruct
+ollama --version
 ```
 
-模型約 4～5 GB。裝完再跑一次 `npm run llm:check`，它會列出 runtime 裡有哪些模型。
-如果你下載的名字跟 `config/llm.json` 裡寫的不一樣，改那個檔案的 `modelKey` 即可。
+```bash
+ollama pull qwen2.5:3b
+```
+
+> **這台機器的限制（2026-08-16 實測）**：實體記憶體 5.9 GB、
+> AMD Ryzen 5 3500U、內顯 Vega 8（與系統共用記憶體，Ollama 會走 CPU）。
+> 7B 模型量化後約需 4～5 GB 常駐記憶體，在這台機器上會吃到虛擬記憶體，
+> 慢到不堪用甚至載入失敗。所以預設用 3B；3B 還吃力就改 `qwen2.5:1.5b`。
+> 跑之前把 Chrome 之類的關一關，可用記憶體差很多。
+
+裝完再跑一次 `npm run llm:check`，它會列出 runtime 裡實際有哪些模型。
+名稱跟 `config/llm.json` 的 `modelKey` 不一樣的話，改那個檔案即可。
+
+> ⚠️ **要有心理準備**：小模型讀中文公告、還要輸出嚴格 JSON 並逐字引用原文，
+> 很可能贏不過「永遠不否決」的 baseline。那不是系統壞掉——
+> gold_set 的設計就是要把這件事量出來。贏不過就不上線，這一層維持關閉，
+> 其餘功能完全不受影響。
 
 ### 4.2 把當日重大訊息排進佇列
 

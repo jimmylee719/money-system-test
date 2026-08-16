@@ -13,11 +13,19 @@
   "enabled": false,
   "_challenger說明": [
     "要參加評測的挑戰者。跑 `npm run llm:eval` 時用的就是這個。",
-    "modelKey 照抄 runtime 顯示的名稱（例如 `ollama list` 那一欄），不要美化。",
+    "modelKey 照抄 runtime 顯示的名稱（`ollama list` 那一欄），不要美化。",
+    "跑 `npm run llm:check` 會列出 runtime 實際有哪些模型，名稱不符會直接告訴你。",
     "Ollama 預設埠 11434、LM Studio 預設埠 1234。"
   ],
+  "_機器限制說明": [
+    "2026-08-16 實測本機：實體記憶體 5.9 GB、AMD Ryzen 5 3500U、",
+    "內顯 Vega 8（與系統共用記憶體）。",
+    "7B 模型量化後約需 4～5 GB 常駐記憶體，在這台機器上會吃到虛擬記憶體，",
+    "慢到不堪用甚至載入失敗，因此預設改為 3B。",
+    "若 3B 仍然吃力，改成 qwen2.5:1.5b。"
+  ],
   "challenger": {
-    "modelKey": "qwen2.5:7b-instruct",
+    "modelKey": "qwen2.5:3b",
     "provider": "ollama",
     "endpoint": "http://127.0.0.1:11434/v1"
   }
