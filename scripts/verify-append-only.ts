@@ -148,7 +148,20 @@ record(
   `HTTP ${healthUpdate.status} ${healthUpdate.text}`,
 );
 
-// ── 5. 匿名身分寫不進去 ───────────────────────────────────────────────────────
+// ── 5. 偽造資料庫蓋章的時間戳 ────────────────────────────────────────────────
+// 0003 之前這裡是通的：Supabase 預設已授予整張表 INSERT，欄位級 grant 形同虛設。
+const forged = await call(config.serviceRoleKey, 'POST', RAW_SNAPSHOTS_TABLE, [
+  { ...probeRow, inserted_at: '2000-01-01T00:00:00Z' },
+]);
+// 錯誤碼必須是 42501（權限不足）。若是別的碼，代表擋下來的理由不是欄位級權限。
+record(
+  'service_role 偽造 inserted_at',
+  '被拒絕且錯誤碼為 42501 —— inserted_at 只能由資料庫蓋章',
+  forged.status >= 400 && forged.text.includes('"code":"42501"'),
+  `HTTP ${forged.status} ${forged.text}`,
+);
+
+// ── 6. 匿名身分寫不進去 ───────────────────────────────────────────────────────
 if (config.anonKey === null) {
   console.log('⚠ 未提供 anon key，略過匿名身分測試\n');
 } else {

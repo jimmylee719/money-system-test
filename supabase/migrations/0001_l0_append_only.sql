@@ -174,6 +174,9 @@ create policy source_health_read
 revoke update, delete, truncate on public.raw_snapshots from public, anon, authenticated, service_role;
 revoke update, delete, truncate on public.source_health from public, anon, authenticated, service_role;
 
+-- ⚠️ 2026-08-16 修正：此處的 `grant insert` 為【表級】權限，應用程式可自行指定
+--    inserted_at。已由 0003_restrict_insert_columns.sql 收回並改為欄位級授權。
+--    保留本段是為了讓 migration 歷史可回溯；請務必接著執行 0003。
 grant select          on public.raw_snapshots to anon, authenticated;
 grant select          on public.source_health to anon, authenticated;
 grant select, insert  on public.raw_snapshots to service_role;

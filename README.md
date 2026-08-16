@@ -13,7 +13,8 @@
 | P1 | L0 抓 TWSE/TPEx | ✅ 完成 |
 | P2 | L0 擴充 MOPS/TAIFEX | ✅ 完成 |
 | P3 | append-only 上 Supabase + drift | ✅ 完成 |
-| P4 | factor_registry | 未開始 |
+| P4 | factor_registry 因子預先登記 | ✅ 完成 |
+| P5 | L1 訊號引擎 + 排序 | 未開始 |
 | … | 見 CLAUDE.md Phase 順序 | |
 
 ## 指令
@@ -25,7 +26,10 @@ npm run typecheck
 npm run l0:ingest         # 抓 13 個來源，存本機 + Supabase 帳本
 npm run l0:verify         # 實測 append-only 三道鎖擋得住
 npm run l0:verify-drift   # 實測 schema drift 偵測整條鏈有效
+npm run factors:verify    # 實測因子登記守門機制擋得住
 ```
+
+SQL 需在 Supabase SQL Editor 依序執行：`supabase/migrations/0001` → `0002` → `0003`。
 
 對真實官方端點的契約測試預設跳過，手動執行：
 
@@ -185,6 +189,35 @@ service 金鑰的用途是繞過 RLS，而**抓取排程正是以 service_role k
 
 儲存位置：`./data/raw`（已 gitignore）。P3 換成 Supabase + RLS 時只換
 `SnapshotStore` 實作，抓取層不動。
+
+## P4：factor_registry 因子預先登記
+
+SQL 在 `supabase/migrations/0002_factor_registry.sql`（+ `0003` 的權限修正）。
+
+### 這張表對抗的不是駭客，是自己
+
+回測最常見的自欺：跑完看到結果，回頭改定義／門檻／方向，再宣稱「早就這樣設計」。
+防這件事**不能靠自律，也不能靠程式**——程式可以被改，append-only 表上的 constraint 改不了。
+
+| 守門 | 擋什麼 | 實測擋下的機制 |
+|---|---|---|
+| `economic_rationale` ≥ 50 字元 | 寫不出經濟機制的資料探勘 | `factor_registry_rationale_not_blank` |
+| `t_threshold >= 3.0` | 事後放寬門檻 | `factor_registry_threshold_check` |
+| `definition_hash` unique | 同定義重複登記混淆試驗次數 | `factor_registry_definition_hash_key` |
+| `registered_at` 無 INSERT 權限 | 偽造登記時間 | `42501 permission denied` |
+| `sample_size >= 30` | CLAUDE.md：樣本 < 30 不得下結論 | `factor_test_results_sample_size_check` |
+| `method` 排除標準 k-fold | 金融資料必然洩漏 | `factor_test_results_method_check` |
+| 觸發器比對 `definition_hash` | 同名偷改參數 | 「定義鎖定後不得調參」 |
+| **觸發器重算 `passed`** | 宣稱通過但數字不支持 | 「passed 自報為 t 但依登記條件應為 f」 |
+| 封存後拒絕一切事件 | 失敗即封存，不得改條件重測 | 「已封存，不得再記錄檢定結果」 |
+
+最後兩項是核心：**你不能宣稱一個數字不支持的結論，資料庫會依登記時的條件自己算一遍。**
+
+### 試驗次數與 DSR
+
+`factor_trial_summary` 提供 `real_registrations`（排除 `probe_` 開頭的驗證探針），
+這才是呈報 Deflated Sharpe Ratio 時該用的試驗次數。探針數量單獨列出可稽核——
+刻意不在總數裡偷偷過濾，否則把真因子命名為 `probe_` 即可從試驗次數消失。
 
 ## 免責
 
