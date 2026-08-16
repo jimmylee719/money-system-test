@@ -84,6 +84,16 @@ jobs:
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
         run: npm run l1:picks -- --write --notify
 
+      # 觀察期走完的訊號才會產生結果。未到期一律略過，不會寫入。
+      # 這一步失敗不影響已寫入的清單，故容許失敗。
+      - name: Compute outcomes
+        id: outcomes
+        continue-on-error: true
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run l5:outcomes -- --write
+
       # 排序若因「非重複寫入」以外的原因失敗，要看得見，但不影響執行紀錄提交
       - name: Report watchlist outcome
         if: always()
@@ -92,6 +102,11 @@ jobs:
             echo "觀察榜已產生並寫入 daily_picks"
           else
             echo "::warning::觀察榜未產生。若為非交易日的重複寫入屬正常；其餘情況請查上一步輸出。"
+          fi
+          if [ "${{ steps.outcomes.outcome }}" = "success" ]; then
+            echo "outcomes 已計算（未到期者會自動略過）"
+          else
+            echo "::warning::outcomes 計算失敗，請查該步驟輸出。已寫入的清單不受影響。"
           fi
 
       # 即使抓取失敗也要記錄 —— 失敗本身就是 G5 要追蹤的事實
