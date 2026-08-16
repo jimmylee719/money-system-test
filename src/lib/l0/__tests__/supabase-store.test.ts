@@ -42,6 +42,7 @@ function entryOf(overrides: Partial<ManifestEntry> = {}): ManifestEntry {
     dataPeriod: snapshot.dataPeriod,
     contentHash: snapshot.contentHash,
     bodyPath: '/data/raw/twse_stock_day_all/2026-08-14/abc.json',
+    storedBytes: 1234,
     error: null,
     snapshot,
     fieldsAdded: [],
@@ -146,12 +147,12 @@ describe('SupabaseSnapshotStore', () => {
       kind: 'supabase_storage',
       async put(): Promise<PutResult> {
         state.puts += 1;
-        return { bodyPath: 'src/2026-08-14/abc.json.gz', written: true };
+        return { bodyPath: 'src/2026-08-14/abc.json.gz', written: true, storedBytes: 4321 };
       },
     };
     const localManifest: SnapshotStore = {
       async put(): Promise<PutResult> {
-        return { bodyPath: '/tmp/body.json', written: true };
+        return { bodyPath: '/tmp/body.json', written: true, storedBytes: 100 };
       },
       async appendManifest(entry) {
         manifest.push(entry);
@@ -192,6 +193,15 @@ describe('SupabaseSnapshotStore', () => {
     const row = f.inserts[0]?.rows[0] as Record<string, unknown>;
     expect(row['body_store']).toBe('supabase_storage');
     expect(f.store.bodyStoreKind).toBe('supabase_storage');
+  });
+
+  it('body_bytes 記錄壓縮後大小，與壓縮前的 content_length 分開', async () => {
+    const f = fakes();
+    await f.store.appendManifest(entryOf({ storedBytes: 4321 }));
+    const row = f.inserts[0]?.rows[0] as Record<string, unknown>;
+    // 容量推算只能用 body_bytes；content_length 是壓縮前，兩者差約 7.6 倍
+    expect(row['body_bytes']).toBe(4321);
+    expect(row['content_length']).not.toBe(4321);
   });
 
   it('成功抓取時同時寫 raw_snapshots 與 source_health，本機 manifest 照留', async () => {

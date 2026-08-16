@@ -44,6 +44,8 @@ export interface RawSnapshotRow {
   readonly content_length: number;
   readonly body_store: BodyStoreKind;
   readonly body_path: string | null;
+  /** 壓縮後實際佔用大小。content_length 為壓縮前，兩者不可混用。 */
+  readonly body_bytes: number | null;
   readonly observed_fields: readonly string[] | null;
   readonly observed_data_dates: readonly string[];
   readonly observed_data_periods: readonly string[];
@@ -76,6 +78,7 @@ export function toRawSnapshotRow(
   snapshot: RawSnapshot,
   bodyPath: string | null,
   bodyStore: BodyStoreKind,
+  storedBytes: number | null = null,
 ): RawSnapshotRow {
   return {
     source_id: snapshot.sourceId,
@@ -90,6 +93,7 @@ export function toRawSnapshotRow(
     content_length: snapshot.contentLength,
     body_store: bodyStore,
     body_path: bodyPath,
+    body_bytes: storedBytes,
     observed_fields: snapshot.observedFields,
     observed_data_dates: snapshot.observedDataDates,
     observed_data_periods: snapshot.observedDataPeriods,
@@ -257,7 +261,7 @@ export class SupabaseSnapshotStore implements SnapshotStore {
 
     if (entry.snapshot !== null) {
       await this.#client.insert(RAW_SNAPSHOTS_TABLE, [
-        toRawSnapshotRow(entry.snapshot, entry.bodyPath, this.#bodyStore.kind),
+        toRawSnapshotRow(entry.snapshot, entry.bodyPath, this.#bodyStore.kind, entry.storedBytes),
       ]);
     }
     await this.#client.insert(SOURCE_HEALTH_TABLE, [toSourceHealthRow(entry)]);

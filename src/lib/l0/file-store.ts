@@ -70,10 +70,11 @@ export class FileSnapshotStore implements SnapshotStore, BodyStore {
     try {
       // 'wx'：檔案已存在即拋 EEXIST。絕不覆寫既有原始資料。
       await writeFile(bodyPath, body, { flag: 'wx' });
-      return { bodyPath, written: true };
+      return { bodyPath, written: true, storedBytes: body.byteLength };
     } catch (error) {
       if (isEexist(error)) {
-        return { bodyPath, written: false };
+        // 本機不壓縮，佔用即原始大小
+        return { bodyPath, written: false, storedBytes: body.byteLength };
       }
       throw error;
     }

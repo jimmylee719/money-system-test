@@ -123,6 +123,31 @@ describe('get / verify', () => {
   });
 });
 
+describe('size —— 容量統計備援（帳本尚無 body_bytes 時使用）', () => {
+  it('取中繼資料而非下載內容，才不會吃 egress 額度', async () => {
+    const fetchImpl = vi.fn(async () => new Response('{"size":11358}', { status: 200 }));
+    const size = await makeStore(fetchImpl).size('a/b/c.json.gz');
+
+    expect(size).toBe(11358);
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    // 打的是 info 端點，不是下載端點
+    expect(url).toBe('https://example.supabase.co/storage/v1/object/info/l0-raw/a/b/c.json.gz');
+    expect(init.method).toBe('GET');
+  });
+
+  it('物件不存在或回應非預期時回 null，不拋錯中斷稽核', async () => {
+    expect(await makeStore(vi.fn(async () => new Response('', { status: 404 }))).size('x')).toBe(
+      null,
+    );
+    expect(
+      await makeStore(vi.fn(async () => new Response('not json', { status: 200 }))).size('x'),
+    ).toBe(null);
+    expect(
+      await makeStore(vi.fn(async () => new Response('{"name":"x"}', { status: 200 }))).size('x'),
+    ).toBe(null);
+  });
+});
+
 describe('isDuplicateError', () => {
   it('認得實測到的回應格式', () => {
     expect(

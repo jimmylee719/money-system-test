@@ -146,6 +146,8 @@ export interface ManifestEntry {
   readonly dataPeriod: string | null;
   readonly contentHash: string | null;
   readonly bodyPath: string | null;
+  /** 實際佔用位元組數（壓縮後）。抓取失敗時為 null。 */
+  readonly storedBytes: number | null;
   readonly error: string | null;
   readonly snapshot: RawSnapshot | null;
   /** 相對註冊表基準欄位，本次多出來的欄位（schema drift） */
@@ -158,6 +160,11 @@ export interface PutResult {
   readonly bodyPath: string;
   /** false 代表內容已存在，未重寫（append-only 語意） */
   readonly written: boolean;
+  /**
+   * 實際佔用的位元組數（壓縮後）。與 RawSnapshot.contentLength（壓縮前）不同，
+   * 兩者差約 7.6 倍，算容量時只能用這個。
+   */
+  readonly storedBytes: number;
 }
 
 /** 原始 bytes 的存放後端。與 SQL 的 raw_snapshots_body_store_check 對應。 */

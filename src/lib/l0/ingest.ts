@@ -43,6 +43,7 @@ export async function ingestSource(
       dataPeriod: null,
       contentHash: null,
       bodyPath: null,
+      storedBytes: null,
       error: result.error,
       snapshot: null,
       // 抓取失敗時無從比對欄位，不假裝「沒有 drift」
@@ -71,6 +72,7 @@ export async function ingestSource(
     dataPeriod: result.snapshot.dataPeriod,
     contentHash: result.snapshot.contentHash,
     bodyPath: put.bodyPath,
+    storedBytes: put.storedBytes,
     error: null,
     snapshot: result.snapshot,
     fieldsAdded: drift.added,

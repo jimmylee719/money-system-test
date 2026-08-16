@@ -114,7 +114,7 @@ export class SupabaseStorageBodyStore implements BodyStore {
     });
 
     if (res.ok) {
-      return { bodyPath: objectPath, written: true };
+      return { bodyPath: objectPath, written: true, storedBytes: compressed.byteLength };
     }
 
     const errorBody = await res.text();
@@ -127,9 +127,36 @@ export class SupabaseStorageBodyStore implements BodyStore {
     //    因此不能只看 HTTP 狀態碼。同時保留對真正 HTTP 409 的判斷，
     //    以免日後行為改變又壞掉。
     if (res.status === 409 || isDuplicateError(errorBody)) {
-      return { bodyPath: objectPath, written: false };
+      // 已存在的物件內容相同（內容定址），壓縮後大小也必然相同
+      return { bodyPath: objectPath, written: false, storedBytes: compressed.byteLength };
     }
     throw new StorageError(`upload ${objectPath}`, res.status, errorBody);
+  }
+
+  /**
+   * 查詢物件的實際佔用大小，**不下載內容**。
+   * 用於帳本尚無 body_bytes 欄位時的容量統計備援：
+   * 一次呼叫只取中繼資料，不消耗 egress 額度（免費方案 5 GB/月）。
+   * 物件不存在回傳 null。
+   */
+  async size(objectPath: string): Promise<number | null> {
+    const res = await this.#fetch(
+      `${this.#url}/storage/v1/object/info/${this.#bucket}/${objectPath}`,
+      {
+        method: 'GET',
+        headers: this.#headers(),
+        signal: AbortSignal.timeout(this.#timeoutMs),
+      },
+    );
+    if (!res.ok) {
+      return null;
+    }
+    try {
+      const info = JSON.parse(await res.text()) as { size?: unknown };
+      return typeof info.size === 'number' ? info.size : null;
+    } catch {
+      return null;
+    }
   }
 
   /** 下載並解壓。供來回一致性驗證與日後回溯使用。 */
