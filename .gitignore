@@ -17,6 +17,9 @@ data/
 *.p12
 service-role*.json
 
+# Supabase CLI 產物（linked-project.json 只有 ref/名稱，無金鑰，但仍不需進版控）
+supabase/.temp/
+
 # logs / cache
 *.log
 .vitest/

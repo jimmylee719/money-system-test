@@ -21,7 +21,9 @@
     "l2:verify": "tsx scripts/verify-veto-events.ts",
     "l3:register": "tsx scripts/register-risk-config.ts",
     "l3:verify": "tsx scripts/verify-risk-config.ts",
-    "l4:verify": "tsx scripts/verify-user-records.ts"
+    "l4:verify": "tsx scripts/verify-user-records.ts",
+    "l4:sync-secrets": "tsx scripts/sync-line-secrets.ts",
+    "l4:verify-webhook": "tsx scripts/verify-webhook.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
