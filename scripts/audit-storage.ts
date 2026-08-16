@@ -124,11 +124,13 @@ let undatedBytes = 0;
 const bytesByDataDay = new Map<string, number>();
 
 for (const [objectPath, refs] of byPath) {
-  const row = refs[0];
+  // 同一個物件會被多列帳本引用。0005 之前的列沒有 body_bytes，
+  // 取最舊的那列會永遠拿到 null 而每次都要向 Storage 查 —— 優先取有值的。
+  const row = refs.find((r) => r.body_bytes !== null) ?? refs[0];
   if (row === undefined) {
     continue;
   }
-  // 帳本沒有大小就向 Storage 問（只取中繼資料，不下載內容）
+  // 帳本仍沒有大小才向 Storage 問（只取中繼資料，不下載內容）
   let bytes = row.body_bytes;
   if (bytes === null) {
     bytes = await store.size(objectPath);
