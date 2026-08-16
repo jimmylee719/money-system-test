@@ -59,4 +59,41 @@ export {
 } from './universe';
 
 export type { LedgerReader, LoadedSnapshot, SnapshotRef } from './loader';
-export { SnapshotIntegrityError, SnapshotLoader, SupabaseLedgerReader } from './loader';
+export {
+  SnapshotIntegrityError,
+  SnapshotLoader,
+  SupabaseLedgerReader,
+  latestPerDate,
+} from './loader';
+
+export {
+  midranksAscending,
+  quantileType7,
+  ranksToScores,
+  scoreCrossSection,
+  winsorize,
+} from './factors/scoring';
+export type { ScoredValues } from './factors/scoring';
+
+export type {
+  FactorContext,
+  FactorScore,
+  InactiveFactor,
+  RankedStock,
+  RankingResult,
+} from './factors/engine';
+export {
+  ENGINE_VERSION,
+  FACTOR_IMPLS,
+  NEUTRAL_SCORE,
+  WATCHLIST_SIZE,
+  rankUniverse,
+  selectLatestRevenue,
+  watchlist,
+} from './factors/engine';
+
+export type { BuildContextInput } from './factors/context';
+export { DataAsOfMismatchError, alignDataAsOf, buildFactorContext } from './factors/context';
+
+export type { BuildPickRowsInput, DailyPickRow, PickListKind } from './picks';
+export { DAILY_PICKS_TABLE, DailyPicksWriter, buildPickRows } from './picks';

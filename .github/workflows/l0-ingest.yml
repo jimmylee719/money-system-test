@@ -65,6 +65,31 @@ jobs:
           fi
           npm run l0:ingest
 
+      # 抓完才排序。抓取失敗時不出榜 —— 寧可今天沒有清單，也不要一份資料不全的清單。
+      #
+      # 觀察榜是研究紀錄，不是買進建議（CLAUDE.md）。
+      # 排序前會先向 factor_registry 核對 definition_hash，對不上就拒絕出榜。
+      #
+      # 非交易日不會有新的行情快照，data_as_of 仍是上一個交易日，
+      # 唯一索引會擋下重複寫入並回傳 409 —— 那是正常狀態，不是故障，故容許失敗。
+      - name: Generate watchlist
+        id: picks
+        continue-on-error: true
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run l1:picks -- --write
+
+      # 排序若因「非重複寫入」以外的原因失敗，要看得見，但不影響執行紀錄提交
+      - name: Report watchlist outcome
+        if: always()
+        run: |
+          if [ "${{ steps.picks.outcome }}" = "success" ]; then
+            echo "觀察榜已產生並寫入 daily_picks"
+          else
+            echo "::warning::觀察榜未產生。若為非交易日的重複寫入屬正常；其餘情況請查上一步輸出。"
+          fi
+
       # 即使抓取失敗也要記錄 —— 失敗本身就是 G5 要追蹤的事實
       - name: Commit run log
         if: always()

@@ -131,6 +131,18 @@ export class FactorRegistry {
     );
   }
 
+  /**
+   * 已封存的 factor_key。
+   * 封存是終局狀態——資料庫會拒絕封存之後的任何狀態事件，
+   * 因此「出現過 archived 事件」即等於「現在是封存狀態」。
+   */
+  async archivedKeys(): Promise<ReadonlySet<string>> {
+    const rows = await this.#reader.select<{ factor_key: string }>(
+      `${FACTOR_STATUS_EVENTS_TABLE}?status=eq.archived&select=factor_key`,
+    );
+    return new Set(rows.map((r) => r.factor_key));
+  }
+
   /** DSR 呈報用。試驗次數含失敗與封存者。 */
   async trialSummary(): Promise<FactorTrialSummary> {
     const rows = await this.#reader.select<FactorTrialSummary>(

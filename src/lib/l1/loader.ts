@@ -41,6 +41,32 @@ export interface LedgerReader {
   latestRef(sourceId: SourceId): Promise<SnapshotRef | null>;
   /** 取某來源在指定資料日期的帳本紀錄 */
   refByDate(sourceId: SourceId, dataAsOf: string): Promise<SnapshotRef | null>;
+  /** 取某來源最近 `limit` 筆帳本紀錄，依寫入順序由新到舊 */
+  recentRefs(sourceId: SourceId, limit: number): Promise<readonly SnapshotRef[]>;
+}
+
+/**
+ * 每個 `data_as_of` 只留最新寫入的那一筆。
+ *
+ * 【為什麼需要這一步】
+ * raw_snapshots 是 append-only：同一天重跑抓取就會多一列，內容相同也照存。
+ * 要組「最近 N 個交易日」的序列時，若不先去重，
+ * 重跑兩次的那天會佔掉兩個位置，回溯期間就少算一天——
+ * 而 5 日反轉因子算錯期間不會報錯，只會靜默給出錯誤的數字。
+ *
+ * @param refsNewestFirst 依寫入順序由新到舊的帳本紀錄
+ */
+export function latestPerDate(refsNewestFirst: readonly SnapshotRef[]): readonly SnapshotRef[] {
+  const seen = new Set<string>();
+  const kept: SnapshotRef[] = [];
+  for (const ref of refsNewestFirst) {
+    if (ref.dataAsOf === null || seen.has(ref.dataAsOf)) {
+      continue;
+    }
+    seen.add(ref.dataAsOf);
+    kept.push(ref);
+  }
+  return kept;
 }
 
 export class SupabaseLedgerReader implements LedgerReader {
@@ -54,11 +80,11 @@ export class SupabaseLedgerReader implements LedgerReader {
     this.#fetch = fetchImpl;
   }
 
-  async #query(query: string): Promise<SnapshotRef | null> {
+  async #query(query: string, limit: number): Promise<readonly SnapshotRef[]> {
     const res = await this.#fetch(
       `${this.#url}/rest/v1/raw_snapshots?${query}` +
         '&select=source_id,data_as_of,data_period,body_path,content_hash,content_length,fetched_at' +
-        '&body_store=eq.supabase_storage&order=id.desc&limit=1',
+        `&body_store=eq.supabase_storage&order=id.desc&limit=${limit}`,
       {
         headers: { apikey: this.#apiKey, Authorization: `Bearer ${this.#apiKey}` },
         signal: AbortSignal.timeout(60_000),
@@ -76,29 +102,34 @@ export class SupabaseLedgerReader implements LedgerReader {
       content_length: number;
       fetched_at: string;
     }[];
-    const row = rows[0];
-    if (row === undefined || row.body_path === null) {
-      return null;
-    }
-    return {
-      sourceId: row.source_id,
-      dataAsOf: row.data_as_of,
-      dataPeriod: row.data_period,
-      bodyPath: row.body_path,
-      contentHash: row.content_hash,
-      contentLength: row.content_length,
-      fetchedAt: row.fetched_at,
-    };
+    return rows
+      .filter((row) => row.body_path !== null)
+      .map((row) => ({
+        sourceId: row.source_id,
+        dataAsOf: row.data_as_of,
+        dataPeriod: row.data_period,
+        bodyPath: row.body_path!,
+        contentHash: row.content_hash,
+        contentLength: row.content_length,
+        fetchedAt: row.fetched_at,
+      }));
   }
 
   async latestRef(sourceId: SourceId): Promise<SnapshotRef | null> {
-    return this.#query(`source_id=eq.${encodeURIComponent(sourceId)}`);
+    const rows = await this.#query(`source_id=eq.${encodeURIComponent(sourceId)}`, 1);
+    return rows[0] ?? null;
   }
 
   async refByDate(sourceId: SourceId, dataAsOf: string): Promise<SnapshotRef | null> {
-    return this.#query(
+    const rows = await this.#query(
       `source_id=eq.${encodeURIComponent(sourceId)}&data_as_of=eq.${encodeURIComponent(dataAsOf)}`,
+      1,
     );
+    return rows[0] ?? null;
+  }
+
+  async recentRefs(sourceId: SourceId, limit: number): Promise<readonly SnapshotRef[]> {
+    return this.#query(`source_id=eq.${encodeURIComponent(sourceId)}`, limit);
   }
 }
 
@@ -129,5 +160,30 @@ export class SnapshotLoader {
 
   async byDate(sourceId: SourceId, dataAsOf: string): Promise<LoadedSnapshot | null> {
     return this.#load(await this.#ledger.refByDate(sourceId, dataAsOf));
+  }
+
+  /**
+   * 取最近 `days` 個**相異交易日**的快照，依日期升冪（最後一筆為最新）。
+   *
+   * 為了容納重跑造成的重複列，實際查詢筆數放大 `overFetch` 倍再去重。
+   * 若去重後不足 `days` 天，就如實回傳較少的天數——不補、不猜。
+   */
+  async recentDays(
+    sourceId: SourceId,
+    days: number,
+    overFetch = 4,
+  ): Promise<readonly LoadedSnapshot[]> {
+    const refs = latestPerDate(await this.#ledger.recentRefs(sourceId, days * overFetch)).slice(
+      0,
+      days,
+    );
+    const loaded: LoadedSnapshot[] = [];
+    for (const ref of [...refs].reverse()) {
+      const snapshot = await this.#load(ref);
+      if (snapshot !== null) {
+        loaded.push(snapshot);
+      }
+    }
+    return loaded;
   }
 }
