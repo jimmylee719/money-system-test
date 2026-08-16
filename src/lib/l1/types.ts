@@ -88,6 +88,21 @@ export interface InstitutionalRow {
   readonly totalNet: number | null;
 }
 
+/** 信用交易（融資融券）餘額 */
+export interface MarginRow {
+  readonly code: string;
+  readonly market: L1Market;
+  readonly date: string;
+  /** 融資前日餘額（張或股，依交易所單位，同來源內一致） */
+  readonly marginBalancePrevDay: number | null;
+  /** 融資今日餘額 */
+  readonly marginBalance: number | null;
+  /** 融券前日餘額 */
+  readonly shortBalancePrevDay: number | null;
+  /** 融券今日餘額 */
+  readonly shortBalance: number | null;
+}
+
 /** 月營收 */
 export interface MonthlyRevenueRow {
   readonly code: string;

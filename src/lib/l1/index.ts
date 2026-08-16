@@ -4,11 +4,24 @@ export type {
   DailyQuote,
   InstitutionalRow,
   L1Market,
+  MarginRow,
   MonthlyRevenueRow,
   Normalized,
   UniverseEntry,
   ValuationRow,
 } from './types';
+
+export {
+  FOREIGN_NET_BUY_RATIO_V1,
+  MARGIN_BALANCE_CHANGE_V1,
+  REV_YOY_MOMENTUM_V1,
+  SHORT_TERM_REVERSAL_5D_V1,
+  TRUST_NET_BUY_RATIO_V1,
+  T_THRESHOLD,
+  TEST_PERIOD_END,
+  TEST_PERIOD_START,
+  V1_FACTORS,
+} from './factors/definitions';
 
 export type { NumericOrNote, ParseStats } from './parse';
 export {
@@ -24,10 +37,12 @@ export {
   normalizeMonthlyRevenue,
   normalizeTpexCompanyProfile,
   normalizeTpexInstitutional,
+  normalizeTpexMargin,
   normalizeTpexQuotes,
   normalizeTpexValuation,
   normalizeTwseCompanyProfile,
   normalizeTwseInstitutional,
+  normalizeTwseMargin,
   normalizeTwseQuotes,
   normalizeTwseValuation,
   rowsFromRwdTable,

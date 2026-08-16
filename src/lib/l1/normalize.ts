@@ -22,6 +22,7 @@ import type {
   DailyQuote,
   InstitutionalRow,
   L1Market,
+  MarginRow,
   MonthlyRevenueRow,
   Normalized,
   UniverseEntry,
@@ -288,6 +289,62 @@ export function normalizeTpexInstitutional(
       trustNet: parseInteger(r['SecuritiesInvestmentTrustCompanies-Difference'], stats),
       dealerNet: parseInteger(r['Dealers-Difference'], stats),
       totalNet: parseInteger(r['TotalDifference'], stats),
+    });
+  }
+  return { rows, stats, sourceRowCount: raw.length, skipped: skips };
+}
+
+// ── 信用交易 ─────────────────────────────────────────────────────────────────
+
+/**
+ * ⚠️ TWSE 的 MI_MARGN payload **沒有日期欄位**，故 L0 的 data_as_of 為 null。
+ * 日期由呼叫端傳入——那是 L1 明確做出的對應推論，不是 L0 的事實。
+ */
+export function normalizeTwseMargin(payload: unknown, date: string): Normalized<MarginRow> {
+  const raw = asRows(payload);
+  const stats = createParseStats();
+  const skips: Skips = {};
+  const rows: MarginRow[] = [];
+
+  for (const r of raw) {
+    const code = parseText(r['股票代號']);
+    if (code === '') {
+      skip(skips, 'missing_code');
+      continue;
+    }
+    rows.push({
+      code,
+      market: 'TWSE',
+      date,
+      marginBalancePrevDay: parseNumeric(r['融資前日餘額'], stats),
+      marginBalance: parseNumeric(r['融資今日餘額'], stats),
+      shortBalancePrevDay: parseNumeric(r['融券前日餘額'], stats),
+      shortBalance: parseNumeric(r['融券今日餘額'], stats),
+    });
+  }
+  return { rows, stats, sourceRowCount: raw.length, skipped: skips };
+}
+
+export function normalizeTpexMargin(payload: unknown, date: string): Normalized<MarginRow> {
+  const raw = asRows(payload);
+  const stats = createParseStats();
+  const skips: Skips = {};
+  const rows: MarginRow[] = [];
+
+  for (const r of raw) {
+    const code = parseText(r['SecuritiesCompanyCode']);
+    if (code === '') {
+      skip(skips, 'missing_code');
+      continue;
+    }
+    rows.push({
+      code,
+      market: 'TPEx',
+      date,
+      marginBalancePrevDay: parseNumeric(r['MarginPurchaseBalancePreviousDay'], stats),
+      marginBalance: parseNumeric(r['MarginPurchaseBalance'], stats),
+      shortBalancePrevDay: parseNumeric(r['ShortSaleBalancePreviousDay'], stats),
+      shortBalance: parseNumeric(r['ShortSaleBalance'], stats),
     });
   }
   return { rows, stats, sourceRowCount: raw.length, skipped: skips };

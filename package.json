@@ -14,6 +14,7 @@
     "l0:verify-storage": "tsx scripts/verify-storage.ts",
     "l0:audit": "tsx scripts/audit-storage.ts",
     "factors:verify": "tsx scripts/verify-factor-registry.ts",
+    "factors:register": "tsx scripts/register-factors.ts",
     "l1:verify": "tsx scripts/verify-l1-universe.ts"
   },
   "devDependencies": {
