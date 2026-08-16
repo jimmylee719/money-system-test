@@ -5,6 +5,7 @@ import {
   hasSupabaseConfig,
   loadSupabaseConfig,
 } from '../env';
+import type { EnvSource } from '../env';
 
 const FAKE_KEY = 'fake-service-role-key-value-that-should-never-be-logged';
 const FAKE_ANON = 'fake-anon-key-value';
@@ -13,7 +14,7 @@ const FULL = {
   NEXT_PUBLIC_SUPABASE_URL: 'https://example.supabase.co',
   SUPABASE_SERVICE_ROLE_KEY: FAKE_KEY,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: FAKE_ANON,
-} satisfies NodeJS.ProcessEnv;
+} satisfies EnvSource;
 
 describe('loadSupabaseConfig', () => {
   it('loads a complete config', () => {

@@ -27,13 +27,27 @@
     "l5:outcomes": "tsx scripts/compute-outcomes.ts",
     "l5:verify": "tsx scripts/verify-outcomes.ts",
     "l5:export": "tsx scripts/export-excel.ts",
-    "l6:g3": "tsx scripts/g3-report.ts"
+    "l6:g3": "tsx scripts/g3-report.ts",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^22.10.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
     "exceljs": "^4.4.0",
+    "postcss": "^8.5.26",
+    "tailwindcss": "^4.3.3",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "next": "^16.3.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "server-only": "^0.0.1"
   }
 }

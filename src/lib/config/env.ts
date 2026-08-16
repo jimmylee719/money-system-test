@@ -38,7 +38,16 @@ export class MissingEnvError extends Error {
   }
 }
 
-function read(env: NodeJS.ProcessEnv, key: string): string | null {
+/**
+ * 只要求「鍵 → 值」的查詢能力，不要求完整的 NodeJS.ProcessEnv。
+ *
+ * Next.js 的型別會把 ProcessEnv 的 NODE_ENV 標成必填，
+ * 導致測試無法傳入只含少數幾個鍵的物件。
+ * 這幾個函式實際上只需要查鍵值，宣告成這樣才是誠實的介面。
+ */
+export type EnvSource = Readonly<Record<string, string | undefined>>;
+
+function read(env: EnvSource, key: string): string | null {
   const value = env[key];
   if (typeof value !== 'string') {
     return null;
@@ -48,7 +57,7 @@ function read(env: NodeJS.ProcessEnv, key: string): string | null {
 }
 
 /** 讀取 Supabase 設定；缺漏時拋錯，錯誤訊息只含變數名稱，不含值。 */
-export function loadSupabaseConfig(env: NodeJS.ProcessEnv = process.env): SupabaseConfig {
+export function loadSupabaseConfig(env: EnvSource = process.env): SupabaseConfig {
   const url = read(env, 'NEXT_PUBLIC_SUPABASE_URL');
   const serviceRoleKey = read(env, 'SUPABASE_SERVICE_ROLE_KEY');
 
@@ -87,7 +96,7 @@ export interface LineConfig {
  * ⚠️ 這三個值都是憑證，永遠不會被印出來。
  *    外洩時請到 LINE Developers Console 立即重新產生。
  */
-export function loadLineConfig(env: NodeJS.ProcessEnv = process.env): LineConfig {
+export function loadLineConfig(env: EnvSource = process.env): LineConfig {
   const channelAccessToken = read(env, 'LINE_CHANNEL_ACCESS_TOKEN');
   const channelSecret = read(env, 'LINE_CHANNEL_SECRET');
   const userId = read(env, 'LINE_USER_ID');
@@ -113,7 +122,7 @@ export function loadLineConfig(env: NodeJS.ProcessEnv = process.env): LineConfig
 }
 
 /** LINE 是否已設定（未設定時日報推播會略過，不讓整條管線失敗） */
-export function hasLineConfig(env: NodeJS.ProcessEnv = process.env): boolean {
+export function hasLineConfig(env: EnvSource = process.env): boolean {
   return (
     read(env, 'LINE_CHANNEL_ACCESS_TOKEN') !== null &&
     read(env, 'LINE_CHANNEL_SECRET') !== null &&
@@ -131,7 +140,7 @@ export function describeLineConfig(config: LineConfig): string {
 }
 
 /** Supabase 是否已設定（用來決定要走本機檔案還是資料庫） */
-export function hasSupabaseConfig(env: NodeJS.ProcessEnv = process.env): boolean {
+export function hasSupabaseConfig(env: EnvSource = process.env): boolean {
   return (
     read(env, 'NEXT_PUBLIC_SUPABASE_URL') !== null &&
     read(env, 'SUPABASE_SERVICE_ROLE_KEY') !== null

@@ -1,0 +1,23 @@
+@import 'tailwindcss';
+
+/*
+ * CLAUDE.md：字型禁用 Inter。改用系統字型堆疊——
+ * 不必額外下載字型檔，中文也有正確的落點字型。
+ */
+@theme {
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, monospace;
+}
+
+/* CLAUDE.md：無動畫函式庫。連 CSS 動畫也一併關掉，資料頁不需要動。 */
+* {
+  animation: none !important;
+  transition: none !important;
+}
+
+body {
+  background: #0b0d10;
+  color: #e6e8eb;
+}

@@ -29,3 +29,8 @@ Thumbs.db
 
 # Excel 匯出檔（可隨時重新產生，不進版控）
 exports/
+
+# Next.js
+.next/
+next-env.d.ts
+*.tsbuildinfo
