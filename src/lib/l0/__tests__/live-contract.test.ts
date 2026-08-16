@@ -11,7 +11,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { fetchSource } from '../fetcher';
+import { DEFAULT_FETCH_OPTIONS, fetchSource } from '../fetcher';
+import { resolveSourceUrl } from '../ingest';
 import { diffFields } from '../snapshot';
 import { ALL_SOURCES } from '../sources';
 import type { L0Deps } from '../types';
@@ -32,7 +33,21 @@ describe.skipIf(!LIVE)('live contract — 真實官方端點', () => {
     it(
       `${source.id} 回應 200 且欄位與註冊表一致`,
       async () => {
-        const result = await fetchSource(source, liveDeps);
+        // 需要日期參數的來源：先抓日期提供者，取得交易所自己宣告的交易日
+        let url = source.url;
+        if (source.dateFrom !== null) {
+          const provider = ALL_SOURCES.find((s) => s.id === source.dateFrom);
+          expect(provider, `找不到日期提供者 ${source.dateFrom}`).toBeDefined();
+          const providerResult = await fetchSource(provider!, liveDeps);
+          expect(providerResult.ok).toBe(true);
+          if (!providerResult.ok) return;
+          const resolved = resolveSourceUrl(source, new Map([[provider!.id, providerResult.snapshot.dataAsOf!]]));
+          expect('url' in resolved, 'error' in resolved ? resolved.error : '').toBe(true);
+          if (!('url' in resolved)) return;
+          url = resolved.url;
+        }
+
+        const result = await fetchSource(source, liveDeps, DEFAULT_FETCH_OPTIONS, url);
         expect(result.ok, result.ok ? '' : result.error).toBe(true);
         if (!result.ok) return;
 
@@ -48,12 +63,17 @@ describe.skipIf(!LIVE)('live contract — 真實官方端點', () => {
         // 每一列的欄位組合一致
         expect(s.heterogeneousRowCount).toBe(0);
 
-        // data_as_of 依來源宣告的規則解析成功
-        expect(['single_date_in_payload', 'max_date_in_payload']).toContain(s.dataAsOfReason);
-        expect(s.dataAsOf).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-
-        // 資料日期不得晚於抓取日期
-        expect((s.dataAsOf ?? '').localeCompare(s.fetchedAt.slice(0, 10))).toBeLessThanOrEqual(0);
+        // data_as_of 依來源宣告的規則解析成功。
+        // dateField 為空字串者代表該 payload 確實沒有日期（已知例外，見 sources.ts）
+        if (source.dateField === '') {
+          expect(s.dataAsOfReason).toBe('date_field_missing');
+          expect(s.dataAsOf).toBe(null);
+        } else {
+          expect(['single_date_in_payload', 'max_date_in_payload']).toContain(s.dataAsOfReason);
+          expect(s.dataAsOf).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+          // 資料日期不得晚於抓取日期
+          expect((s.dataAsOf ?? '').localeCompare(s.fetchedAt.slice(0, 10))).toBeLessThanOrEqual(0);
+        }
 
         // 有宣告 periodField 的來源，data_period 必須解析成功且不晚於 data_as_of
         if (source.periodField !== null) {

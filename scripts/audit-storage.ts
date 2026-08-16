@@ -119,6 +119,8 @@ console.log('--- 容量 ---');
 let usedBytes = 0;
 let unknownSize = 0;
 let lookedUp = 0;
+/** data_as_of 為 null 的來源（如 twse_margin_balance）佔用的空間 */
+let undatedBytes = 0;
 const bytesByDataDay = new Map<string, number>();
 
 for (const [objectPath, refs] of byPath) {
@@ -139,11 +141,15 @@ for (const [objectPath, refs] of byPath) {
     continue;
   }
   usedBytes += bytes;
-  const day = row.data_as_of ?? 'unknown';
-  bytesByDataDay.set(day, (bytesByDataDay.get(day) ?? 0) + bytes);
+  if (row.data_as_of === null) {
+    undatedBytes += bytes;
+  } else {
+    bytesByDataDay.set(row.data_as_of, (bytesByDataDay.get(row.data_as_of) ?? 0) + bytes);
+  }
 }
 
-const dataDays = [...bytesByDataDay.keys()].filter((d) => d !== 'unknown').length;
+const dataDays = bytesByDataDay.size;
+const datedBytes = [...bytesByDataDay.values()].reduce((a, b) => a + b, 0);
 console.log(`已用       ：${mb(usedBytes)} MB / ${mb(FREE_TIER_BYTES)} MB（${((usedBytes / FREE_TIER_BYTES) * 100).toFixed(2)}%）`);
 if (lookedUp > 0) {
   console.log(`（其中 ${lookedUp} 個物件的大小是即時向 Storage 查詢的；跑完 0005 後改由帳本直接提供，更快）`);
@@ -155,12 +161,16 @@ if (unknownSize > 0) {
 if (dataDays === 0) {
   console.log('資料天數   ：0，無法推算增量');
 } else {
-  const dailyRate = usedBytes / dataDays;
+  // 只用「有日期的」位元組除以資料天數。把無日期來源攤進去會高估每日增量。
+  const dailyRate = datedBytes / dataDays;
   const remainingDays = Math.floor((FREE_TIER_BYTES - usedBytes) / dailyRate);
   // 台股一年約 250 個交易日
   const remainingYears = remainingDays / 250;
 
   console.log(`資料天數   ：${dataDays} 天（相異 data_as_of）`);
+  if (undatedBytes > 0) {
+    console.log(`無日期來源 ：${mb(undatedBytes)} MB（payload 未宣告日期者，不計入每日增量）`);
+  }
   console.log(`每日增量   ：${mb(dailyRate)} MB／資料日（實測，非估計）`);
   console.log(`剩餘容量   ：約 ${remainingDays} 個資料日 ≈ ${remainingYears.toFixed(1)} 年（以每年 250 交易日計）`);
 

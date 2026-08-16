@@ -139,7 +139,7 @@ L0 鐵則：**只存不判斷**。原始回應逐位元組保存，不清洗、�
 | `file-store.ts` | append-only 檔案儲存 |
 | `ingest.ts` | 編排：依序抓取 + 禮貌延遲，單一來源失敗不中斷其他 |
 
-### 已驗證端點（13 個，2026-08-16 實測，每季覆核）
+### 已驗證端點（17 個，2026-08-16 實測，每季覆核）
 
 端點目錄來源：
 [TWSE](https://openapi.twse.com.tw/v1/swagger.json)（143 個）／
@@ -161,6 +161,29 @@ L0 鐵則：**只存不判斷**。原始回應逐位元組保存，不清洗、�
 | `taifex_institutional_futures_options` | 三大法人期貨與選擇權 | P6 L2 市場環境 |
 | `taifex_put_call_ratio` | 臺指選擇權 Put/Call 比 | P6 L2 市場情緒 |
 | `taifex_large_traders_futures` | 期貨大額交易人未沖銷部位 | P6 L2 市場環境 |
+| `twse_institutional_by_stock` | 上市個股三大法人買賣超 ⚠️ | P5 法人籌碼因子 |
+| `twse_margin_balance` | 上市個股融資融券餘額 | P5 信用交易因子 |
+| `tpex_institutional_by_stock` | 上櫃個股三大法人買賣超 | P5 法人籌碼因子 |
+| `tpex_margin_balance` | 上櫃個股融資融券餘額 | P5 信用交易因子 |
+
+⚠️ `twse_institutional_by_stock` 是**唯一不在 OpenAPI 目錄裡**的來源。
+2026-08-16 以「法人／投信／外資／自營／T86」關鍵字掃過 TWSE 全部 143 個端點，
+只有外資持股比率，**查無個股三大法人買賣超**。改用 TWSE 網站自己在用的端點——
+資料同樣官方一手，但可能無預警變動，故標記 `endpointStability: 'website_internal'`，
+drift 監控要特別留意。有測試鎖住「只有這一個來源可以用 `www.twse.com.tw`」。
+
+它另有兩點與其他來源不同：
+
+1. **payload 形狀不同**：`{stat, date, fields, data}`，欄位名與資料分離，
+   數字帶千分位逗號（`"250,897,716"`）——L0 只存不判斷，逗號照留
+2. **網址需要日期參數**：日期取自 `twse_stock_day_all` 的 `data_as_of`，
+   也就是**交易所自己宣告的最新交易日**。不用系統時鐘猜——猜會撞到週末、
+   國定假日、颱風假。日期提供者失敗時寧可不抓，並如實記錄失敗原因。
+
+另註：`twse_margin_balance` 的 payload **完全沒有日期欄位**（16 個欄位皆為個股資料），
+故 `data_as_of` 如實記為 `null`、原因 `date_field_missing`。刻意不從同一次抓取的其他
+來源「借」日期——那是推論不是事實。L1 使用時以 `fetched_at` 搭配交易日曆對應，
+該推論會被明確記錄在 L1，不會混進 L0 假裝成事實。
 
 ### 日期規則：三個欄位不可混為一談
 

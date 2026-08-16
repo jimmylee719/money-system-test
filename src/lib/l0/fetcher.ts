@@ -28,13 +28,15 @@ export async function fetchSource(
   source: SourceDescriptor,
   deps: L0Deps,
   options: FetchOptions = DEFAULT_FETCH_OPTIONS,
+  /** 已填入日期參數的實際網址。未提供時使用 source.url。 */
+  url: string = source.url,
 ): Promise<FetchSourceResult> {
   const errors: string[] = [];
 
   for (let attempt = 1; attempt <= options.maxAttempts; attempt += 1) {
     const startedAt = deps.now();
     try {
-      const response = await deps.fetchImpl(source.url, {
+      const response = await deps.fetchImpl(url, {
         headers: { Accept: 'application/json' },
         signal: AbortSignal.timeout(options.timeoutMs),
       });
@@ -49,6 +51,7 @@ export async function fetchSource(
           body,
           snapshot: buildSnapshot({
             source,
+            url,
             body,
             fetchedAt: finishedAt,
             httpStatus: response.status,

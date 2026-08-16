@@ -4,6 +4,7 @@ import {
   MOPS_TWSE_MATERIAL_ANNOUNCEMENTS,
   MOPS_TWSE_MONTHLY_REVENUE,
   TAIFEX_PUT_CALL_RATIO,
+  TWSE_INSTITUTIONAL_BY_STOCK,
   TWSE_STOCK_DAY_ALL,
 } from '../sources';
 import type { PayloadDateSpec } from '../types';
@@ -12,6 +13,7 @@ const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
 
 /** 單日快照類：民國年壓縮 + 要求唯一日期（P1 行情類的規格） */
 const DAY_SPEC: PayloadDateSpec = {
+  payloadShape: 'json_array',
   dateField: 'Date',
   dateFormat: 'roc_compact',
   dateSelection: 'unique',
@@ -235,6 +237,56 @@ describe('inspectPayload — MOPS 月營收的兩個日期', () => {
     });
     expect(r.dataPeriod).toBe(null);
     expect(r.observedDataPeriods).toEqual([]);
+  });
+});
+
+describe('inspectPayload — TWSE 網站端點的 rwd_table 形狀', () => {
+  /** 取自 2026-08-16 實測 T86 回應的結構，資料列縮減 */
+  const REAL_T86 = JSON.stringify({
+    stat: 'OK',
+    date: '20260814',
+    title: '115年08月14日 三大法人買賣超日報',
+    fields: ['證券代號', '證券名稱', '投信買賣超股數', '三大法人買賣超股數'],
+    data: [
+      ['00403A', '主動統一升級50  ', '0', '250,897,716'],
+      ['1101', '台泥', '1,234,000', '5,678,900'],
+    ],
+    total: 2,
+  });
+
+  it('欄位名取自 fields、日期取自頂層 date', () => {
+    const r = inspectPayload(enc(REAL_T86), TWSE_INSTITUTIONAL_BY_STOCK);
+    expect(r.dataAsOf).toBe('2026-08-14');
+    expect(r.dataAsOfReason).toBe('single_date_in_payload');
+    expect(r.rowCount).toBe(2);
+    expect(r.heterogeneousRowCount).toBe(0);
+    expect(r.observedFields).toEqual(
+      ['證券代號', '證券名稱', '投信買賣超股數', '三大法人買賣超股數'].sort(),
+    );
+  });
+
+  it('欄數與 fields 不符的列會被記為結構不一致', () => {
+    const broken = JSON.stringify({
+      date: '20260814',
+      fields: ['a', 'b', 'c'],
+      data: [['1', '2', '3'], ['1', '2'], ['1', '2', '3', '4']],
+    });
+    const r = inspectPayload(enc(broken), TWSE_INSTITUTIONAL_BY_STOCK);
+    expect(r.rowCount).toBe(3);
+    expect(r.heterogeneousRowCount).toBe(2);
+  });
+
+  it('非交易日等情況官方不給 fields/data，如實記為空而非報錯', () => {
+    const noData = JSON.stringify({ stat: '很抱歉，沒有符合條件的資料!', date: '20260816' });
+    const r = inspectPayload(enc(noData), TWSE_INSTITUTIONAL_BY_STOCK);
+    expect(r.dataAsOfReason).toBe('payload_empty');
+    expect(r.rowCount).toBe(0);
+    expect(r.observedFields).toEqual([]);
+  });
+
+  it('千分位逗號原封不動保留（L0 只存不判斷）', () => {
+    // 資料本身不經 inspectPayload 改寫，這裡驗證原始 bytes 未被更動
+    expect(REAL_T86).toContain('"250,897,716"');
   });
 });
 

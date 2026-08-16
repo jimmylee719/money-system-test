@@ -22,6 +22,14 @@ export function adCompactToIso(value: string): string | null {
   return isValidIsoDate(iso) ? iso : null;
 }
 
+/** "2026-08-14" → "20260814"；非真實日期回傳 null */
+export function isoDateToAdCompact(value: string): string | null {
+  if (!isValidIsoDate(value)) {
+    return null;
+  }
+  return value.replace(/-/g, '');
+}
+
 /** 依來源宣告的格式解析日期 */
 export function parseSourceDate(value: string, format: SourceDateFormat): string | null {
   switch (format) {

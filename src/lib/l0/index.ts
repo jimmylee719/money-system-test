@@ -4,6 +4,8 @@ export type {
   BodyStore,
   BodyStoreKind,
   DataAsOfReason,
+  EndpointStability,
+  PayloadShape,
   DateSelection,
   FetchOptions,
   FetchSourceResult,
@@ -26,6 +28,7 @@ export type {
 
 export {
   ALL_SOURCES,
+  CHIP_SOURCES,
   MOPS_SOURCES,
   MOPS_TPEX_COMPANY_PROFILE,
   MOPS_TPEX_MATERIAL_ANNOUNCEMENTS,
@@ -39,9 +42,13 @@ export {
   TAIFEX_LARGE_TRADERS_FUTURES,
   TAIFEX_PUT_CALL_RATIO,
   TAIFEX_SOURCES,
+  TPEX_INSTITUTIONAL_BY_STOCK,
   TPEX_MAINBOARD_DAILY_CLOSE_QUOTES,
   TPEX_MAINBOARD_PERATIO_ANALYSIS,
+  TPEX_MARGIN_BALANCE,
   TWSE_BWIBBU_ALL,
+  TWSE_INSTITUTIONAL_BY_STOCK,
+  TWSE_MARGIN_BALANCE,
   TWSE_STOCK_DAY_ALL,
 } from './sources';
 
@@ -49,6 +56,7 @@ export { ROC_YEAR_OFFSET, isoDateToRoc, rocDateToIso } from './roc-date';
 
 export {
   adCompactToIso,
+  isoDateToAdCompact,
   parseSourceDate,
   parseSourcePeriod,
   rocYearMonthToIsoPeriod,
@@ -92,9 +100,11 @@ export {
 export type { SupabaseStorageOptions } from './supabase-storage';
 
 export {
+  DATE_PLACEHOLDER,
   DEFAULT_INGEST_OPTIONS,
   createLiveDeps,
   ingestAll,
   ingestSource,
+  resolveSourceUrl,
 } from './ingest';
 export type { IngestOptions } from './ingest';

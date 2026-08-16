@@ -5,6 +5,7 @@
  * 單一來源失敗不中斷其他來源——失敗本身也是要保存的事實，會寫進 manifest。
  */
 
+import { isoDateToAdCompact } from './date-formats';
 import { DEFAULT_FETCH_OPTIONS, DEFAULT_POLITENESS_DELAY_MS, fetchSource } from './fetcher';
 import { diffFields } from './snapshot';
 import { ALL_SOURCES } from './sources';
@@ -14,7 +15,41 @@ import type {
   L0Deps,
   SnapshotStore,
   SourceDescriptor,
+  SourceId,
 } from './types';
+
+/** 網址樣板中的日期佔位符 */
+export const DATE_PLACEHOLDER = '{date_ad_compact}';
+
+/**
+ * 填入網址中的日期。
+ *
+ * 日期一律取自 `dateFrom` 指定來源的 data_as_of ——
+ * 那是交易所自己宣告的最新交易日，不是我們用系統時鐘推的。
+ * 用今天的日期去猜會在週末、國定假日、颱風假抓到空資料。
+ */
+export function resolveSourceUrl(
+  source: SourceDescriptor,
+  dataAsOfBySource: ReadonlyMap<SourceId, string>,
+): { readonly url: string } | { readonly error: string } {
+  if (!source.url.includes(DATE_PLACEHOLDER)) {
+    return { url: source.url };
+  }
+  if (source.dateFrom === null) {
+    return { error: `${source.id} 的網址需要日期，但註冊表未指定 dateFrom` };
+  }
+  const iso = dataAsOfBySource.get(source.dateFrom);
+  if (iso === undefined) {
+    return {
+      error: `${source.id} 需要 ${source.dateFrom} 的 data_as_of 來組網址，但該來源本次未成功取得日期`,
+    };
+  }
+  const compact = isoDateToAdCompact(iso);
+  if (compact === null) {
+    return { error: `${source.dateFrom} 的 data_as_of「${iso}」無法轉為西元壓縮格式` };
+  }
+  return { url: source.url.replace(DATE_PLACEHOLDER, compact) };
+}
 
 export interface IngestOptions {
   readonly fetch: FetchOptions;
@@ -31,8 +66,35 @@ export async function ingestSource(
   deps: L0Deps,
   store: SnapshotStore,
   options: IngestOptions = DEFAULT_INGEST_OPTIONS,
+  dataAsOfBySource: ReadonlyMap<SourceId, string> = new Map(),
 ): Promise<IngestResult> {
-  const result = await fetchSource(source, deps, options.fetch);
+  const resolved = resolveSourceUrl(source, dataAsOfBySource);
+  if ('error' in resolved) {
+    // 組不出網址就不抓 —— 不用系統時鐘猜日期。失敗照樣進 manifest。
+    await store.appendManifest({
+      sourceId: source.id,
+      status: 'failed',
+      fetchedAt: deps.now().toISOString(),
+      dataAsOf: null,
+      dataPeriod: null,
+      contentHash: null,
+      bodyPath: null,
+      storedBytes: null,
+      error: resolved.error,
+      snapshot: null,
+      fieldsAdded: [],
+      fieldsRemoved: [],
+    });
+    return {
+      sourceId: source.id,
+      status: 'failed',
+      snapshot: null,
+      bodyPath: null,
+      error: resolved.error,
+    };
+  }
+
+  const result = await fetchSource(source, deps, options.fetch, resolved.url);
 
   if (!result.ok) {
     const entry = {
@@ -95,11 +157,18 @@ export async function ingestAll(
   options: IngestOptions = DEFAULT_INGEST_OPTIONS,
 ): Promise<readonly IngestResult[]> {
   const results: IngestResult[] = [];
+  // 已成功取得日期的來源，供需要日期參數的端點組網址
+  const dataAsOfBySource = new Map<SourceId, string>();
+
   for (const [index, source] of sources.entries()) {
     if (index > 0 && options.politenessDelayMs > 0) {
       await deps.sleep(options.politenessDelayMs);
     }
-    results.push(await ingestSource(source, deps, store, options));
+    const result = await ingestSource(source, deps, store, options, dataAsOfBySource);
+    if (result.snapshot?.dataAsOf != null) {
+      dataAsOfBySource.set(source.id, result.snapshot.dataAsOf);
+    }
+    results.push(result);
   }
   return results;
 }

@@ -24,7 +24,12 @@ export type SourceId =
   // P2：TAIFEX
   | 'taifex_institutional_futures_options'
   | 'taifex_put_call_ratio'
-  | 'taifex_large_traders_futures';
+  | 'taifex_large_traders_futures'
+  // P2.5：個股法人買賣超與信用交易
+  | 'twse_institutional_by_stock'
+  | 'twse_margin_balance'
+  | 'tpex_institutional_by_stock'
+  | 'tpex_margin_balance';
 
 /**
  * 來源分級（CLAUDE.md 資料來源優先序）
@@ -56,9 +61,30 @@ export type SourcePeriodFormat =
  */
 export type DateSelection = 'unique' | 'max';
 
+/**
+ * payload 的結構形狀。事先宣告，不從內容嗅探。
+ * - `json_array`：頂層即為物件陣列（OpenAPI 端點皆為此形狀）
+ * - `twse_rwd_table`：TWSE 網站端點形狀
+ *   `{stat, date, fields: string[], data: string[][]}` —— 欄位名與資料分離，
+ *   且日期在頂層而非每一列
+ */
+export type PayloadShape = 'json_array' | 'twse_rwd_table';
+
+/**
+ * 端點的穩定度承諾。這是**事實記錄**，不是品質評分：
+ * - `documented_openapi`：列於官方 OpenAPI 目錄，有版本與文件
+ * - `website_internal`：官方網站自己在用的端點，資料同樣是一手，
+ *   但未列入 OpenAPI 目錄，可能無預警變動 → drift 監控要特別留意
+ */
+export type EndpointStability = 'documented_openapi' | 'website_internal';
+
 /** payload 日期解析規格 */
 export interface PayloadDateSpec {
-  /** payload 中代表「資料日期」的欄位名 */
+  readonly payloadShape: PayloadShape;
+  /**
+   * 代表「資料日期」的欄位名。
+   * `json_array` 時指每一列的欄位；`twse_rwd_table` 時指 payload 頂層的鍵。
+   */
   readonly dateField: string;
   readonly dateFormat: SourceDateFormat;
   readonly dateSelection: DateSelection;
@@ -69,7 +95,17 @@ export interface PayloadDateSpec {
 
 export interface SourceDescriptor extends PayloadDateSpec {
   readonly id: SourceId;
+  /**
+   * 端點網址。若含 `{date_ad_compact}` 佔位符，抓取前必須由 `dateFrom`
+   * 指定的來源提供日期填入 —— 日期不自行推定，避免猜到非交易日。
+   */
   readonly url: string;
+  /**
+   * 網址需要日期時，由哪個來源的 data_as_of 提供。
+   * 那是交易所自己宣告的最新交易日，不是我們猜的。
+   */
+  readonly dateFrom: SourceId | null;
+  readonly endpointStability: EndpointStability;
   readonly market: Market;
   readonly sourceTier: SourceTier;
   readonly description: string;

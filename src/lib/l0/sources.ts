@@ -28,6 +28,9 @@ export const TWSE_STOCK_DAY_ALL: SourceDescriptor = {
   description: '上市個股日成交資訊（全部）',
   usedBy: 'P5 訊號引擎（價量因子）／P9 outcomes 報酬計算',
   verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
   dateField: 'Date',
   dateFormat: 'roc_compact',
   dateSelection: 'unique',
@@ -56,6 +59,9 @@ export const TWSE_BWIBBU_ALL: SourceDescriptor = {
   description: '上市個股日本益比、殖利率及股價淨值比（全部）',
   usedBy: 'P5 訊號引擎（評價因子）',
   verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
   dateField: 'Date',
   dateFormat: 'roc_compact',
   dateSelection: 'unique',
@@ -72,6 +78,9 @@ export const TPEX_MAINBOARD_DAILY_CLOSE_QUOTES: SourceDescriptor = {
   description: '上櫃股票每日收盤行情',
   usedBy: 'P5 訊號引擎（價量因子）／P9 outcomes 報酬計算',
   verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
   dateField: 'Date',
   dateFormat: 'roc_compact',
   dateSelection: 'unique',
@@ -107,6 +116,9 @@ export const TPEX_MAINBOARD_PERATIO_ANALYSIS: SourceDescriptor = {
   description: '上櫃股票本益比、殖利率及股價淨值比',
   usedBy: 'P5 訊號引擎（評價因子）',
   verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
   dateField: 'Date',
   dateFormat: 'roc_compact',
   dateSelection: 'unique',
@@ -139,6 +151,9 @@ export const MOPS_TWSE_MONTHLY_REVENUE: SourceDescriptor = {
   description: '上市公司每月營業收入彙總表',
   usedBy: 'P5 訊號引擎（營收動能因子）',
   verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
   dateField: '出表日期',
   dateFormat: 'roc_compact',
   dateSelection: 'unique',
@@ -170,6 +185,9 @@ export const MOPS_TPEX_MONTHLY_REVENUE: SourceDescriptor = {
   description: '上櫃公司每月營業收入彙總表',
   usedBy: 'P5 訊號引擎（營收動能因子）',
   verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
   dateField: '出表日期',
   dateFormat: 'roc_compact',
   dateSelection: 'unique',
@@ -201,6 +219,9 @@ export const MOPS_TWSE_COMPANY_PROFILE: SourceDescriptor = {
   description: '上市公司基本資料（產業別、實收資本額、已發行股數等）',
   usedBy: 'P5 排序分群（同業比較）／P6 L2 否決層（規模門檻）',
   verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
   dateField: '出表日期',
   dateFormat: 'roc_compact',
   dateSelection: 'unique',
@@ -251,6 +272,9 @@ export const MOPS_TPEX_COMPANY_PROFILE: SourceDescriptor = {
   description: '上櫃股票基本資料（產業別、實收資本額、已發行股數等）',
   usedBy: 'P5 排序分群（同業比較）／P6 L2 否決層（規模門檻）',
   verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
   dateField: 'Date',
   dateFormat: 'roc_compact',
   dateSelection: 'unique',
@@ -305,6 +329,9 @@ export const MOPS_TWSE_MATERIAL_ANNOUNCEMENTS: SourceDescriptor = {
   description: '上市公司每日重大訊息',
   usedBy: 'P6 L2 否決層（事件過濾）',
   verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
   dateField: '發言日期',
   dateFormat: 'roc_compact',
   dateSelection: 'max',
@@ -331,6 +358,9 @@ export const MOPS_TPEX_MATERIAL_ANNOUNCEMENTS: SourceDescriptor = {
   description: '上櫃公司每日重大訊息',
   usedBy: 'P6 L2 否決層（事件過濾）',
   verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
   dateField: '發言日期',
   dateFormat: 'roc_compact',
   dateSelection: 'max',
@@ -361,6 +391,9 @@ export const TAIFEX_INSTITUTIONAL_FUTURES_OPTIONS: SourceDescriptor = {
   description: '三大法人-區分期貨與選擇權二類-依日期',
   usedBy: 'P6 L2 否決層（市場環境）',
   verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
   dateField: 'Date',
   dateFormat: 'ad_compact',
   dateSelection: 'unique',
@@ -405,6 +438,9 @@ export const TAIFEX_PUT_CALL_RATIO: SourceDescriptor = {
   description: '臺指選擇權 Put/Call 比',
   usedBy: 'P6 L2 否決層（市場情緒）',
   verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
   dateField: 'Date',
   dateFormat: 'ad_compact',
   dateSelection: 'max',
@@ -429,6 +465,9 @@ export const TAIFEX_LARGE_TRADERS_FUTURES: SourceDescriptor = {
   description: '期貨大額交易人未沖銷部位資料',
   usedBy: 'P6 L2 否決層（市場環境）',
   verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
   dateField: 'Date',
   dateFormat: 'ad_compact',
   dateSelection: 'unique',
@@ -445,6 +484,198 @@ export const TAIFEX_LARGE_TRADERS_FUTURES: SourceDescriptor = {
     'Top10Buy',
     'Top10Sell',
     'OIOfMarket',
+  ],
+};
+
+// ── P2.5：個股三大法人買賣超與信用交易 ───────────────────────────────────────
+
+/**
+ * ⚠️ 唯一一個**不在** OpenAPI 目錄裡的來源。
+ *
+ * 2026-08-16 實測：TWSE OpenAPI 143 個端點以「法人／投信／外資／自營／T86」
+ * 關鍵字全掃，只有外資持股比率（MI_QFIIS_*），**查無個股三大法人買賣超**。
+ * 但個股法人買賣超是台股最常用的因子輸入之一，缺了 P5 會做不完整。
+ *
+ * 因此改用 TWSE 網站自己在用的端點：資料同樣是官方一手，但未列入 OpenAPI 目錄，
+ * 可能無預警變動 → `endpointStability: 'website_internal'`，drift 監控要特別留意。
+ *
+ * 兩個與其他來源不同之處：
+ *   1. payload 形狀是 `{stat, date, fields, data}`，欄位名與資料分離，
+ *      數字帶千分位逗號（如 "83,309,387"）—— L0 只存不判斷，逗號照留
+ *   2. 必須帶日期參數。日期取自 twse_stock_day_all 的 data_as_of，
+ *      也就是**交易所自己宣告的最新交易日**，不用系統時鐘猜（會撞到假日）
+ */
+export const TWSE_INSTITUTIONAL_BY_STOCK: SourceDescriptor = {
+  id: 'twse_institutional_by_stock',
+  url: 'https://www.twse.com.tw/rwd/zh/fund/T86?date={date_ad_compact}&selectType=ALL&response=json',
+  dateFrom: 'twse_stock_day_all',
+  endpointStability: 'website_internal',
+  market: 'TWSE',
+  sourceTier: 'official_primary',
+  description: '上市個股三大法人買賣超日報',
+  usedBy: 'P5 訊號引擎（法人籌碼因子）／P6 L2 否決層',
+  verifiedAt: '2026-08-16',
+  payloadShape: 'twse_rwd_table',
+  dateField: 'date', // 頂層鍵，非每列欄位
+  dateFormat: 'ad_compact',
+  dateSelection: 'unique',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: [
+    '證券代號',
+    '證券名稱',
+    '外陸資買進股數(不含外資自營商)',
+    '外陸資賣出股數(不含外資自營商)',
+    '外陸資買賣超股數(不含外資自營商)',
+    '外資自營商買進股數',
+    '外資自營商賣出股數',
+    '外資自營商買賣超股數',
+    '投信買進股數',
+    '投信賣出股數',
+    '投信買賣超股數',
+    '自營商買賣超股數',
+    '自營商買進股數(自行買賣)',
+    '自營商賣出股數(自行買賣)',
+    '自營商買賣超股數(自行買賣)',
+    '自營商買進股數(避險)',
+    '自營商賣出股數(避險)',
+    '自營商買賣超股數(避險)',
+    '三大法人買賣超股數',
+  ],
+};
+
+/**
+ * 2026-08-16 實測澄清：此端點是**個股層級**（1,294 列，含股票代號），
+ * 先前 P2 報告標為「未驗證粒度」，現已確認。
+ *
+ * ⚠️ **此端點的 payload 完全沒有日期欄位**（16 個欄位皆為個股資料）。
+ * 因此 `dateField` 留空，data_as_of 會如實記為 null、原因 `date_field_missing`，
+ * 原始 bytes 歸入 unknown-date。
+ *
+ * 刻意不從同一次抓取的其他來源「借」日期填進去 —— 那是推論不是事實，
+ * 而 data_as_of 的語意就是「payload 自己宣告的日期」。
+ * L1 要使用時以 fetched_at 搭配交易日曆對應，屆時該推論會被明確記錄在 L1，
+ * 不會混進 L0 假裝成事實。
+ */
+export const TWSE_MARGIN_BALANCE: SourceDescriptor = {
+  id: 'twse_margin_balance',
+  url: 'https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  market: 'TWSE',
+  sourceTier: 'official_primary',
+  description: '上市個股融資融券餘額',
+  usedBy: 'P5 訊號引擎（信用交易因子）／P6 L2 否決層（籌碼面）',
+  verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  /** 空字串＝此 payload 沒有日期欄位（見上方說明），不是漏填 */
+  dateField: '',
+  dateFormat: 'roc_compact',
+  dateSelection: 'unique',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: [
+    '股票代號',
+    '股票名稱',
+    '融資買進',
+    '融資賣出',
+    '融資現金償還',
+    '融資前日餘額',
+    '融資今日餘額',
+    '融資限額',
+    '融券買進',
+    '融券賣出',
+    '融券現券償還',
+    '融券前日餘額',
+    '融券今日餘額',
+    '融券限額',
+    '資券互抵',
+    '註記',
+  ],
+};
+
+/** 櫃買的個股三大法人在正式 OpenAPI 目錄裡，不需走網站端點 */
+export const TPEX_INSTITUTIONAL_BY_STOCK: SourceDescriptor = {
+  id: 'tpex_institutional_by_stock',
+  url: 'https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  market: 'TPEx',
+  sourceTier: 'official_primary',
+  description: '上櫃股票三大法人買賣明細資訊',
+  usedBy: 'P5 訊號引擎（法人籌碼因子）／P6 L2 否決層',
+  verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateField: 'Date',
+  dateFormat: 'roc_compact',
+  dateSelection: 'unique',
+  periodField: null,
+  periodFormat: null,
+  // 官方欄位名含前導空格與不一致的分隔，逐字照抄：
+  //   " Foreign Investors ...-Total Sell" 開頭有空格
+  //   "Dealers -TotalSell" 與 "Dealers-TotalSell" 並存
+  baselineFields: [
+    'Date',
+    'SecuritiesCompanyCode',
+    'CompanyName',
+    'Foreign Investors include Mainland Area Investors (Foreign Dealers excluded)-Total Buy',
+    ' Foreign Investors include Mainland Area Investors (Foreign Dealers excluded)-Total Sell',
+    'Foreign Investors include Mainland Area Investors (Foreign Dealers excluded)-Difference',
+    'Foreign Dealers-Total Buy',
+    'Foreign Dealers-TotalSell',
+    'ForeignDealers-Difference',
+    'ForeignInvestorsIncludeMainlandAreaInvestors-TotalBuy',
+    'ForeignInvestorsIncludeMainlandAreaInvestors-TotalSell',
+    'ForeignInvestorsInclude MainlandAreaInvestors-Difference',
+    'SecuritiesInvestmentTrustCompanies-TotalBuy',
+    'SecuritiesInvestmentTrustCompanies-TotalSell',
+    'SecuritiesInvestmentTrustCompanies-Difference',
+    'Dealers-TotalBuy',
+    'Dealers-TotalSell',
+    'Dealers-Difference',
+    'Dealers -TotalSell',
+    'TotalDifference',
+  ],
+};
+
+export const TPEX_MARGIN_BALANCE: SourceDescriptor = {
+  id: 'tpex_margin_balance',
+  url: 'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_margin_balance',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  market: 'TPEx',
+  sourceTier: 'official_primary',
+  description: '上櫃股票融資融券餘額',
+  usedBy: 'P5 訊號引擎（信用交易因子）／P6 L2 否決層（籌碼面）',
+  verifiedAt: '2026-08-16',
+  payloadShape: 'json_array',
+  dateField: 'Date',
+  dateFormat: 'roc_compact',
+  dateSelection: 'unique',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: [
+    'Date',
+    'SecuritiesCompanyCode',
+    'CompanyName',
+    'MarginPurchaseBalancePreviousDay',
+    'MarginPurchase',
+    'MarginSales',
+    'CashRedemption',
+    'MarginPurchaseBalance',
+    'MarginPurchaseBalanceBelongSecuritiesFinanceEnterprise',
+    'MarginPurchaseUtilizationRate',
+    'MarginPurchaseQuota',
+    'ShortSaleBalancePreviousDay',
+    'ShortSale',
+    'ShortConvering',
+    'StockRedemption',
+    'ShortSaleBalance',
+    'ShortSaleBalanceBelongSecuritiesFinanceEnterprise',
+    'ShortSaleUtilizationRate',
+    'ShortSaleQuota',
+    'Offsetting',
+    'Note',
   ],
 };
 
@@ -475,10 +706,23 @@ export const TAIFEX_SOURCES: readonly SourceDescriptor[] = [
   TAIFEX_LARGE_TRADERS_FUTURES,
 ];
 
+/**
+ * P2.5 籌碼面。
+ * ⚠️ 順序有意義：`twse_institutional_by_stock` 的網址需要日期，
+ * 而日期來自 `twse_stock_day_all`（在 QUOTE_SOURCES 中，排在前面）。
+ */
+export const CHIP_SOURCES: readonly SourceDescriptor[] = [
+  TWSE_INSTITUTIONAL_BY_STOCK,
+  TWSE_MARGIN_BALANCE,
+  TPEX_INSTITUTIONAL_BY_STOCK,
+  TPEX_MARGIN_BALANCE,
+];
+
 export const ALL_SOURCES: readonly SourceDescriptor[] = [
   ...QUOTE_SOURCES,
   ...MOPS_SOURCES,
   ...TAIFEX_SOURCES,
+  ...CHIP_SOURCES,
 ];
 
 export const SOURCES_BY_ID: Readonly<Record<SourceId, SourceDescriptor>> = {
@@ -495,4 +739,8 @@ export const SOURCES_BY_ID: Readonly<Record<SourceId, SourceDescriptor>> = {
   taifex_institutional_futures_options: TAIFEX_INSTITUTIONAL_FUTURES_OPTIONS,
   taifex_put_call_ratio: TAIFEX_PUT_CALL_RATIO,
   taifex_large_traders_futures: TAIFEX_LARGE_TRADERS_FUTURES,
+  twse_institutional_by_stock: TWSE_INSTITUTIONAL_BY_STOCK,
+  twse_margin_balance: TWSE_MARGIN_BALANCE,
+  tpex_institutional_by_stock: TPEX_INSTITUTIONAL_BY_STOCK,
+  tpex_margin_balance: TPEX_MARGIN_BALANCE,
 };
