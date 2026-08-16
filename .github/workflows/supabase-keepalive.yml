@@ -1,0 +1,67 @@
+# Supabase keep-alive
+#
+# 【事實｜Supabase 官方文件 going-into-prod，2026-08-16 查證】
+#   "We may pause applications on the Free Plan that exhibit low activity
+#    in a 7-day period to save on server resources."
+#
+# ⚠️ 判定依據是【資料庫活動】，所以這裡刻意查一張真的表，
+#    而不是打 /auth/v1/health 這類不碰資料庫的端點。
+#
+# 🔴 只用 anon key。絕不在此使用 service role key。
+#    raw_snapshots 已對 anon 開放 SELECT（見 supabase/migrations/0001）。
+#
+# 🔴 這是免費方案的權宜措施。升上 Pro 之後專案不會被暫停，此排程即可整個刪除。
+#    （Pro 真正該升的理由是「免費方案沒有備份」，不是暫停。）
+#
+# 前置設定：GitHub repo → Settings → Secrets and variables → Actions
+#   SUPABASE_URL       = Supabase 專案網址
+#   SUPABASE_ANON_KEY  = anon / public key
+#
+# ⚠️ 本 repo 為 public。Actions secrets 不會提供給 fork 的 PR，排程與手動觸發才拿得到。
+
+name: Supabase keep-alive
+
+on:
+  schedule:
+    # 每 3 天 21:35 UTC（台灣時間隔日 05:35）。
+    # 間隔遠低於 7 天門檻；避開整點——GitHub 官方明示整點負載高時排程可能延後或被丟棄。
+    - cron: '35 21 */3 * *'
+  workflow_dispatch: # 可手動觸發，用來驗證設定是否正確
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Query the database
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_ANON_KEY:-}" ]; then
+            echo "::error::SUPABASE_URL / SUPABASE_ANON_KEY 未設定，此排程沒有實際作用"
+            exit 1
+          fi
+
+          # 查一列即可。目的是產生資料庫活動，不是取資料。
+          status=$(curl -sS -o /tmp/body -w '%{http_code}' \
+            -H "apikey: ${SUPABASE_ANON_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_ANON_KEY}" \
+            "${SUPABASE_URL}/rest/v1/raw_snapshots?select=id&limit=1")
+
+          echo "HTTP ${status}"
+          head -c 300 /tmp/body || true
+          echo
+
+          # 🔴 靜默失敗等於沒做。任何非 2xx 都要讓這個 job 紅掉。
+          if [ "${status}" -lt 200 ] || [ "${status}" -ge 300 ]; then
+            echo "::error::資料庫查詢失敗（HTTP ${status}）。專案可能已被暫停，或金鑰已失效。"
+            exit 1
+          fi
+
+          echo "OK — 資料庫已收到查詢，閒置計時器已重置。"
