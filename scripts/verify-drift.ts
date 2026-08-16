@@ -37,10 +37,11 @@ let store: SnapshotStore = fileStore;
 let config: ReturnType<typeof loadSupabaseConfig> | null = null;
 if (hasSupabaseConfig()) {
   config = loadSupabaseConfig();
+  // drift 驗證只關心 source_health 的落地，bytes 留本機即可
   store = new SupabaseSnapshotStore(
     fileStore,
     new Postgrest({ url: config.url, apiKey: config.serviceRoleKey }),
-    'file',
+    fileStore,
   );
 }
 

@@ -134,7 +134,16 @@ describe('FileSnapshotStore — append-only', () => {
     expect(api).not.toContain('update');
     expect(api).not.toContain('remove');
     expect(api.sort()).toEqual(
-      ['appendManifest', 'bodyPathFor', 'constructor', 'manifestPath', 'put', 'readManifest', 'root'].sort(),
+      [
+        'appendManifest',
+        'bodyPathFor',
+        'constructor',
+        'kind',
+        'manifestPath',
+        'put',
+        'readManifest',
+        'root',
+      ].sort(),
     );
   });
 });

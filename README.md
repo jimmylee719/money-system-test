@@ -14,6 +14,7 @@
 | P2 | L0 擴充 MOPS/TAIFEX | ✅ 完成 |
 | P3 | append-only 上 Supabase + drift | ✅ 完成 |
 | P4 | factor_registry 因子預先登記 | ✅ 完成 |
+| P4.5 | 原始 bytes 上雲 + 抓取排程自動化 | ✅ 完成 |
 | P5 | L1 訊號引擎 + 排序 | 未開始 |
 | … | 見 CLAUDE.md Phase 順序 | |
 
@@ -27,9 +28,50 @@ npm run l0:ingest         # 抓 13 個來源，存本機 + Supabase 帳本
 npm run l0:verify         # 實測 append-only 三道鎖擋得住
 npm run l0:verify-drift   # 實測 schema drift 偵測整條鏈有效
 npm run factors:verify    # 實測因子登記守門機制擋得住
+npm run l0:verify-storage # 實測上傳→下載→解壓→重算雜湊來回一致
+npm run l0:audit          # 稽核帳本與 Storage 是否一致（偵測資料遺失）
 ```
 
-SQL 需在 Supabase SQL Editor 依序執行：`supabase/migrations/0001` → `0002` → `0003`。
+SQL 需在 Supabase SQL Editor 依序執行：`0001` → `0002` → `0003` → `0004`。
+
+## P4.5：原始 bytes 上雲 + 抓取排程
+
+### 為什麼是 Supabase Storage 而不是 Cloudflare R2
+
+實測壓縮率（13 個來源共 8.27 MB）：
+
+| | 原始 | gzip level 9 | 壓縮比 |
+|---|---|---|---|
+| 櫃買行情（最大檔） | 4,005 KB | 388 KB | 10.3x |
+| 全部合計 | 8.27 MB | **1.09 MB** | **7.6x** |
+
+每日 1.09 MB → Supabase 免費 1 GB 可用 **939 天 ≈ 2.6 年**，G1 只需 6 個月。
+R2 免費 10 GB 雖可用 25.7 年，但需要多三組憑證（account id / access key / secret），
+而 G5 要求連續 60 日零故障——**多三個憑證就是多三個會過期、輪替、設錯的地方**。
+額度接近時再搬 R2，屆時只換 `BodyStore` 實作。
+
+### 物件命名與稽核
+
+```
+l0-raw/<source_id>/<data_as_of>/<content_hash>.json.gz
+```
+
+檔名是**原始 bytes**（非壓縮後）的 SHA-256，因此：內容定址去重成立、
+下載解壓後可直接與帳本的 `content_hash` 比對。
+
+⚠️ **Storage 擋不住刪除**：service_role 繞過 Storage 的 RLS，且 storage API 以自己的
+角色連線，SQL 層的 `REVOKE` 管不到。資料表能上觸發器，Storage 不能。
+
+預防做不到，偵測就必須自動化——`npm run l0:audit` 逐列比對帳本與實際物件，
+遺失或雜湊不符即為資料事故（**交易所 OpenAPI 只提供最新一日，過去的抓不回來**）。
+
+### 排程
+
+`.github/workflows/l0-ingest.yml` 每日 10:40 UTC（台灣 18:40）執行，並將一行執行紀錄
+提交至 `ops/ingest-log.jsonl`。這一步同時解決兩件事：
+
+1. GitHub public repo「60 天無 repository activity 排程自動停用」——會讓 G5 永遠達不成
+2. G5「連續 60 日零故障」需要的可稽核證據鏈
 
 對真實官方端點的契約測試預設跳過，手動執行：
 

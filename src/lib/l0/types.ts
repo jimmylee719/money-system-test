@@ -160,6 +160,19 @@ export interface PutResult {
   readonly written: boolean;
 }
 
+/** 原始 bytes 的存放後端。與 SQL 的 raw_snapshots_body_store_check 對應。 */
+export type BodyStoreKind = 'file' | 'r2' | 'supabase_storage';
+
+/**
+ * 原始 bytes 的儲存埠。與帳本分離：
+ * bytes 可能在本機、Supabase Storage 或 R2，帳本一律在 Postgres。
+ * 換後端只換這個實作，抓取層與帳本層都不動。
+ */
+export interface BodyStore {
+  readonly kind: BodyStoreKind;
+  put(snapshot: RawSnapshot, body: Uint8Array): Promise<PutResult>;
+}
+
 /** 儲存埠。P1 為本機檔案實作；P3 換成 Supabase 時只換這個實作。 */
 export interface SnapshotStore {
   put(snapshot: RawSnapshot, body: Uint8Array): Promise<PutResult>;

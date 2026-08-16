@@ -1,6 +1,8 @@
 /** L0 資料層 public API（P1 行情 + P2 MOPS/TAIFEX） */
 
 export type {
+  BodyStore,
+  BodyStoreKind,
   DataAsOfReason,
   DateSelection,
   FetchOptions,
@@ -73,13 +75,21 @@ export {
   toSourceHealthRow,
 } from './supabase-store';
 export type {
-  BodyStoreKind,
   PostgrestClient,
   PostgrestOptions,
   RawSnapshotRow,
   SourceHealthRow,
   SourceHealthStatus,
 } from './supabase-store';
+
+export {
+  DEFAULT_BUCKET,
+  StorageError,
+  SupabaseStorageBodyStore,
+  UNKNOWN_DATE_PREFIX,
+  isDuplicateError,
+} from './supabase-storage';
+export type { SupabaseStorageOptions } from './supabase-storage';
 
 export {
   DEFAULT_INGEST_OPTIONS,

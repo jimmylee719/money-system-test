@@ -23,7 +23,10 @@ L0 資料  多來源抓取 / 原始快照 / append-only     ← 廣度無上限
 
 ## 技術棧
 - Next.js 16.2.x LTS + React 19.2.4+ + TypeScript strict + Tailwind + shadcn/ui
-- Supabase (PostgreSQL + RLS)／**GitHub Actions（排程）**／Vercel（Dashboard 部署）／R2／LINE
+- Supabase (PostgreSQL + RLS + Storage)／**GitHub Actions（排程）**／Vercel（Dashboard）／LINE
+  - 原始 bytes 存 Supabase Storage 並 gzip：實測 13 來源每日 8.27 MB → 1.09 MB（7.6x），
+    免費 1 GB 可用約 2.6 年，G1 只需 6 個月。**不引入 Cloudflare R2**：多三組憑證
+    就多三個過期／輪替／設錯的機會，而 G5 要求連續 60 日零故障。額度接近時再搬 R2。
   - 排程用 GitHub Actions 不用 Vercel Pro Cron：public repo 標準 runner 免費且無限，
     每日抓取約 30 秒；Vercel Pro 為 US$20/月。已於 2026-08-16 查證官方文件並實測。
 - Python 獨立 service：因子檢定與統計運算（pandas / numpy / scipy）
@@ -56,8 +59,10 @@ llm_queue / model_registry / llm_results / gold_set
 鎖三須**單獨**驗證：從程式端會先被鎖二擋掉，觸發器根本不會執行。
 **三個時間欄位語意不同不可混用**：`data_as_of`（payload 自身日期）／`data_period`
 （資料涵蓋期間，如月營收 8/15 公布 7 月數字）／`fetched_at`（系統時鐘）。混用即前視偏誤。
-**Postgres 只存帳本與 content_hash，原始 bytes 存 R2／檔案**：13 來源每日約 6.5 MB，
-入庫兩個多月即撐爆免費額度。兩邊靠 content_hash 互相稽核。
+**Postgres 只存帳本與 content_hash，原始 bytes 存 Supabase Storage（gzip）**：
+13 來源每日 8.27 MB，直接入庫兩個多月即撐爆免費額度。兩邊靠 content_hash 互相稽核。
+⚠️ **Storage 擋不住刪除**（service_role 繞過其 RLS，且 storage API 不受 SQL 層 REVOKE 約束）。
+預防做不到，偵測就必須自動化：`npm run l0:audit` 逐列比對帳本與物件，遺失或雜湊不符即事故。
 **daily_picks 與 user_records 必須分表**：系統建議與人的決策分開存，才能比對差異。
 
 ## 買賣邏輯（Triple-Barrier，不可簡化）
@@ -114,7 +119,10 @@ G4 人工執行一致率 >90%｜G5 資料管線連續 60 日零故障
 - **Supabase 免費方案**：「low activity in a 7-day period」會暫停專案（官方文件）。
   每日抓取寫入資料庫即算活動；另備獨立 keep-alive 排程，抓取壞掉時仍能保住資料庫。
 - **GitHub 排程自動停用**：public repo「60 天無 repository activity」排程會被停用
-  （官方文件）。G5 要求連續 60 日零故障，此風險直接衝突，須以提交紀錄或心跳檔規避。
+  （官方文件）。G5 要求連續 60 日零故障，此風險直接衝突。
+  已規避：每次抓取將一行紀錄提交至 `ops/ingest-log.jsonl`，同時產生活動與 G5 證據鏈。
+- **Supabase Storage 無法阻擋刪除**：資料表可上觸發器，Storage 不行。
+  僅能事後偵測，故 `l0:audit` 須納入例行檢查。
 - **GitHub 排程可能延遲**：官方明示整點負載高時可能延後甚至丟棄，故一律避開整點。
 ## Skill／合規
 Skill：`genesis-protocol`（全程）／`data-analysis`（因子檢定）／`xlsx`（Excel 匯出）

@@ -15,7 +15,14 @@
 
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { ManifestEntry, PutResult, RawSnapshot, SnapshotStore } from './types';
+import type {
+  BodyStore,
+  BodyStoreKind,
+  ManifestEntry,
+  PutResult,
+  RawSnapshot,
+  SnapshotStore,
+} from './types';
 
 export const MANIFEST_FILENAME = 'manifest.jsonl';
 export const UNKNOWN_DATE_DIR = 'unknown-date';
@@ -29,11 +36,15 @@ function isEexist(error: unknown): boolean {
   );
 }
 
-export class FileSnapshotStore implements SnapshotStore {
+export class FileSnapshotStore implements SnapshotStore, BodyStore {
   readonly #root: string;
 
   constructor(root: string) {
     this.#root = path.resolve(root);
+  }
+
+  get kind(): BodyStoreKind {
+    return 'file';
   }
 
   get root(): string {

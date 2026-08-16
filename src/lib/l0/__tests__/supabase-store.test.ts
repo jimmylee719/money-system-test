@@ -12,7 +12,7 @@ import {
 import { buildSnapshot } from '../snapshot';
 import { MOPS_TWSE_MONTHLY_REVENUE, TWSE_STOCK_DAY_ALL } from '../sources';
 import type { PostgrestClient } from '../supabase-store';
-import type { ManifestEntry, PutResult, RawSnapshot, SnapshotStore } from '../types';
+import type { BodyStore, ManifestEntry, PutResult, RawSnapshot, SnapshotStore } from '../types';
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
 
@@ -132,7 +132,7 @@ describe('toSourceHealthRow', () => {
 });
 
 describe('SupabaseSnapshotStore', () => {
-  function fakes(): {
+  function fakes(withLocalManifest = true): {
     store: SupabaseSnapshotStore;
     inserts: { table: string; rows: readonly unknown[] }[];
     manifest: ManifestEntry[];
@@ -142,9 +142,15 @@ describe('SupabaseSnapshotStore', () => {
     const manifest: ManifestEntry[] = [];
     const state = { puts: 0 };
 
-    const bodyStore: SnapshotStore = {
+    const bodyStore: BodyStore = {
+      kind: 'supabase_storage',
       async put(): Promise<PutResult> {
         state.puts += 1;
+        return { bodyPath: 'src/2026-08-14/abc.json.gz', written: true };
+      },
+    };
+    const localManifest: SnapshotStore = {
+      async put(): Promise<PutResult> {
         return { bodyPath: '/tmp/body.json', written: true };
       },
       async appendManifest(entry) {
@@ -163,7 +169,7 @@ describe('SupabaseSnapshotStore', () => {
       },
     };
     return {
-      store: new SupabaseSnapshotStore(bodyStore, client),
+      store: new SupabaseSnapshotStore(bodyStore, client, withLocalManifest ? localManifest : null),
       inserts,
       manifest,
       get puts() {
@@ -175,9 +181,17 @@ describe('SupabaseSnapshotStore', () => {
   it('原始 bytes 交給 bodyStore，不寫進資料庫', async () => {
     const f = fakes();
     const result = await f.store.put(snapshotOf(TWSE_STOCK_DAY_ALL, QUOTE_BODY), enc(QUOTE_BODY));
-    expect(result.bodyPath).toBe('/tmp/body.json');
+    expect(result.bodyPath).toBe('src/2026-08-14/abc.json.gz');
     expect(f.puts).toBe(1);
     expect(f.inserts).toHaveLength(0);
+  });
+
+  it('body_store 欄位取自 bodyStore.kind，不由呼叫端指定', async () => {
+    const f = fakes();
+    await f.store.appendManifest(entryOf());
+    const row = f.inserts[0]?.rows[0] as Record<string, unknown>;
+    expect(row['body_store']).toBe('supabase_storage');
+    expect(f.store.bodyStoreKind).toBe('supabase_storage');
   });
 
   it('成功抓取時同時寫 raw_snapshots 與 source_health，本機 manifest 照留', async () => {
@@ -188,6 +202,15 @@ describe('SupabaseSnapshotStore', () => {
     expect(f.inserts.map((i) => i.table)).toEqual([RAW_SNAPSHOTS_TABLE, SOURCE_HEALTH_TABLE]);
     expect(f.inserts[0]?.rows).toHaveLength(1);
     expect(f.inserts[1]?.rows).toHaveLength(1);
+  });
+
+  it('CI 上不留本機 manifest，但資料庫照寫', async () => {
+    const f = fakes(false);
+    await f.store.appendManifest(entryOf());
+
+    expect(f.manifest).toHaveLength(0);
+    expect(f.inserts.map((i) => i.table)).toEqual([RAW_SNAPSHOTS_TABLE, SOURCE_HEALTH_TABLE]);
+    expect(await f.store.readManifest()).toEqual([]);
   });
 
   it('抓取失敗時不寫 raw_snapshots，但一定留下 source_health 紀錄', async () => {

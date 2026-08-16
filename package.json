@@ -11,6 +11,8 @@
     "l0:ingest": "tsx scripts/l0-ingest.ts",
     "l0:verify": "tsx scripts/verify-append-only.ts",
     "l0:verify-drift": "tsx scripts/verify-drift.ts",
+    "l0:verify-storage": "tsx scripts/verify-storage.ts",
+    "l0:audit": "tsx scripts/audit-storage.ts",
     "factors:verify": "tsx scripts/verify-factor-registry.ts"
   },
   "devDependencies": {

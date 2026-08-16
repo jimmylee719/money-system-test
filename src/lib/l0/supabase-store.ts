@@ -12,14 +12,13 @@
  */
 
 import type {
+  BodyStore,
+  BodyStoreKind,
   ManifestEntry,
   PutResult,
   RawSnapshot,
   SnapshotStore,
 } from './types';
-
-/** 原始 bytes 的存放位置。與 SQL 的 raw_snapshots_body_store_check 對應。 */
-export type BodyStoreKind = 'file' | 'r2';
 
 /**
  * source_health 的狀態。判定順序由嚴重到輕微，第一個成立者勝出：
@@ -221,23 +220,30 @@ export const RAW_SNAPSHOTS_TABLE = 'raw_snapshots';
 export const SOURCE_HEALTH_TABLE = 'source_health';
 
 /**
- * 原始 bytes 交給 `bodyStore`，帳本與健康度寫進 Supabase。
+ * 原始 bytes 交給 `bodyStore`（本機檔案或 Supabase Storage），
+ * 帳本與健康度寫進 Postgres。
  *
- * 本機 manifest 仍照寫 —— 資料庫掛掉時抓取不該停擺，且兩份紀錄可互相稽核。
+ * `localManifest` 為選配的本機 manifest 備份：
+ * 在自己電腦上跑時保留，可與資料庫互相稽核；
+ * 在 GitHub Actions 上跑時檔案系統是拋棄式的，傳 null 即可。
  */
 export class SupabaseSnapshotStore implements SnapshotStore {
-  readonly #bodyStore: SnapshotStore;
+  readonly #bodyStore: BodyStore;
   readonly #client: PostgrestClient;
-  readonly #bodyStoreKind: BodyStoreKind;
+  readonly #localManifest: SnapshotStore | null;
 
   constructor(
-    bodyStore: SnapshotStore,
+    bodyStore: BodyStore,
     client: PostgrestClient,
-    bodyStoreKind: BodyStoreKind = 'file',
+    localManifest: SnapshotStore | null = null,
   ) {
     this.#bodyStore = bodyStore;
     this.#client = client;
-    this.#bodyStoreKind = bodyStoreKind;
+    this.#localManifest = localManifest;
+  }
+
+  get bodyStoreKind(): BodyStoreKind {
+    return this.#bodyStore.kind;
   }
 
   async put(snapshot: RawSnapshot, body: Uint8Array): Promise<PutResult> {
@@ -245,17 +251,19 @@ export class SupabaseSnapshotStore implements SnapshotStore {
   }
 
   async appendManifest(entry: ManifestEntry): Promise<void> {
-    await this.#bodyStore.appendManifest(entry);
+    if (this.#localManifest !== null) {
+      await this.#localManifest.appendManifest(entry);
+    }
 
     if (entry.snapshot !== null) {
       await this.#client.insert(RAW_SNAPSHOTS_TABLE, [
-        toRawSnapshotRow(entry.snapshot, entry.bodyPath, this.#bodyStoreKind),
+        toRawSnapshotRow(entry.snapshot, entry.bodyPath, this.#bodyStore.kind),
       ]);
     }
     await this.#client.insert(SOURCE_HEALTH_TABLE, [toSourceHealthRow(entry)]);
   }
 
   async readManifest(): Promise<readonly ManifestEntry[]> {
-    return this.#bodyStore.readManifest();
+    return this.#localManifest?.readManifest() ?? [];
   }
 }

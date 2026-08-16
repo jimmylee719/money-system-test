@@ -1,0 +1,91 @@
+# L0 每日抓取
+#
+# 原始 bytes → Supabase Storage（gzip，實測壓縮比 7.6x）
+# 帳本／健康度 → Supabase raw_snapshots / source_health
+# 執行紀錄 → ops/ingest-log.jsonl，直接提交回本 repo
+#
+# 【為什麼要提交執行紀錄】兩個用途，缺一不可：
+#   1. G5「資料管線連續 60 日零故障」需要可稽核的證據鏈
+#   2. GitHub 官方明示：public repo 若 60 天無 repository activity，
+#      排程會被【自動停用】。若不產生活動，G5 永遠達不成 —— 排程會先自己死掉。
+#
+# 前置設定：GitHub repo → Settings → Secrets and variables → Actions
+#   SUPABASE_URL               = Supabase 專案網址（與 keep-alive 共用，已設定）
+#   SUPABASE_SERVICE_ROLE_KEY  = service_role key（本工作流專用，需新增）
+#
+# 程式讀的環境變數名是 NEXT_PUBLIC_SUPABASE_URL，在下方 env 區塊對應過去，
+# 這樣兩個工作流共用同一個 secret，少一個會設錯的地方。
+#
+# ⚠️ 本 repo 為 public。Actions secrets 不會提供給 fork 的 PR，
+#    只有排程與本 repo 的手動觸發拿得到。
+
+name: L0 ingest
+
+on:
+  schedule:
+    # 每日 10:40 UTC（台灣時間 18:40）。
+    # 台股 13:30 收盤，交易所約 15:00 前發布日資料，18:40 有充分緩衝。
+    # 避開整點 —— GitHub 官方明示整點負載高時排程可能延後甚至被丟棄。
+    - cron: '40 10 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write # 需要寫入權限才能提交執行紀錄
+
+concurrency:
+  # 同時只允許一個抓取執行，避免兩個 job 同時改 ops/ingest-log.jsonl
+  group: l0-ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run L0 ingest
+        id: ingest
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NEXT_PUBLIC_SUPABASE_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "::error::Supabase secrets 未設定。抓取會退回本機檔案模式，而 runner 是拋棄式的，資料會遺失。"
+            exit 1
+          fi
+          npm run l0:ingest
+
+      # 即使抓取失敗也要記錄 —— 失敗本身就是 G5 要追蹤的事實
+      - name: Commit run log
+        if: always()
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [ -z "$(git status --porcelain ops/)" ]; then
+            echo "執行紀錄無變更，略過提交"
+            exit 0
+          fi
+
+          git add ops/
+          git commit -m "chore(ops): L0 ingest 執行紀錄 $(date -u +%Y-%m-%d)"
+
+          # 併發或人為提交可能讓遠端超前，重試一次再放棄
+          for attempt in 1 2 3; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            echo "push 第 ${attempt} 次失敗，重試"
+            sleep 5
+          done
+          echo "::error::執行紀錄提交失敗。排程仍有效，但 60 天無活動會被自動停用，需人工處理。"
+          exit 1
