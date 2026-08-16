@@ -6,6 +6,9 @@ dist/
 .next/
 out/
 
+# L0 原始快照（體積大且每日成長，不進版控；正式環境走 Supabase / R2）
+data/
+
 # secrets — 絕不可提交（CLAUDE.md 禁止事項）
 .env
 .env.*

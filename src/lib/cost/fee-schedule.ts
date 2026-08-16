@@ -5,6 +5,7 @@
  * 任何數字若查無官方來源，一律不寫死，改為 BrokerFeeConfig 輸入參數。
  */
 
+import { assertValidIsoDate } from '../shared/calendar';
 import type { BrokerFeeConfig, RoundingMode, TradeType } from './types';
 
 /**
@@ -51,30 +52,10 @@ export const PPM_DIVISOR = 1_000_000n;
 export const BPS_DIVISOR = 10_000n;
 
 const VALID_ROUNDING_MODES: readonly RoundingMode[] = ['floor', 'ceil', 'half_up'];
-const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
-const DAYS_IN_MONTH: readonly number[] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
-function isLeapYear(year: number): boolean {
-  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
-}
-
-/** 驗證 'YYYY-MM-DD' 且必須是真實存在的日期（不使用 Date，保持純函式） */
+/** 驗證 'YYYY-MM-DD' 且必須是真實存在的日期 */
 export function assertValidTradeDate(tradeDate: string): void {
-  const m = DATE_RE.exec(tradeDate);
-  if (m === null) {
-    throw new RangeError(`tradeDate must be 'YYYY-MM-DD', got "${tradeDate}"`);
-  }
-  const year = Number(m[1]);
-  const month = Number(m[2]);
-  const day = Number(m[3]);
-  if (month < 1 || month > 12) {
-    throw new RangeError(`tradeDate has invalid month: "${tradeDate}"`);
-  }
-  const base = DAYS_IN_MONTH[month - 1] ?? 0;
-  const maxDay = month === 2 && isLeapYear(year) ? 29 : base;
-  if (day < 1 || day > maxDay) {
-    throw new RangeError(`tradeDate has invalid day: "${tradeDate}"`);
-  }
+  assertValidIsoDate(tradeDate, 'tradeDate');
 }
 
 /**

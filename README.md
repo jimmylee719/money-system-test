@@ -10,15 +10,23 @@
 | Phase | 內容 | 狀態 |
 |---|---|---|
 | P0 | 成本／損益兩平模組 | ✅ 完成 |
-| P1 | L0 抓 TWSE/TPEx | 未開始 |
+| P1 | L0 抓 TWSE/TPEx | ✅ 完成 |
+| P2 | L0 擴充 MOPS/TAIFEX | 未開始 |
 | … | 見 CLAUDE.md Phase 順序 | |
 
 ## 指令
 
 ```bash
 npm install
-npm test        # Vitest，44 個測試
+npm test            # 80 個離線測試（不碰網路）
 npm run typecheck
+npm run l0:ingest   # 實際連線抓取，存到 ./data/raw
+```
+
+對真實官方端點的契約測試預設跳過，手動執行：
+
+```bash
+$env:L0_LIVE='1'; npx vitest run src/lib/l0/__tests__/live-contract.test.ts
 ```
 
 ## P0 模組：`src/lib/cost`
@@ -56,6 +64,43 @@ npm run typecheck
 一律列為 `BrokerFeeConfig` 輸入參數，不寫死。
 
 ⚠️ 本系統禁止當沖。`day_trade` 模式僅供成本比較，任何呼叫都會回傳 warning。
+
+## P1 模組：`src/lib/l0`
+
+L0 鐵則：**只存不判斷**。原始回應逐位元組保存，不清洗、不篩選、不改欄位名、
+不修正官方錯字（櫃買 `LatesAskPrice` 少一個 t，照抄）。
+
+| 檔案 | 用途 |
+|---|---|
+| `sources.ts` | 已實測驗證的端點註冊表 + 基準欄位 |
+| `roc-date.ts` | 民國年 ↔ 西元（`"1150814"` → `"2026-08-14"`） |
+| `snapshot.ts` | payload 觀察、SHA-256、schema drift 比對 |
+| `fetcher.ts` | HTTP 抓取，fetch／時鐘／sleep 皆注入，可離線測試 |
+| `file-store.ts` | append-only 檔案儲存 |
+| `ingest.ts` | 編排：依序抓取 + 禮貌延遲，單一來源失敗不中斷其他 |
+
+### 已驗證端點（2026-08-16 實測，每季覆核）
+
+| SourceId | 端點 |
+|---|---|
+| `twse_stock_day_all` | `https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL` |
+| `twse_bwibbu_all` | `https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL` |
+| `tpex_mainboard_daily_close_quotes` | `https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes` |
+| `tpex_mainboard_peratio_analysis` | `https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis` |
+
+### append-only 怎麼保證
+
+1. 檔名就是內容的 SHA-256 → 內容一變必然是不同檔案，不可能覆蓋舊資料
+2. 寫入用 `flag: 'wx'`（存在即失敗），不用 `'w'`
+3. `FileSnapshotStore` **沒有** delete / update 方法（有測試斷言這件事）
+4. `manifest.jsonl` 每次抓取追加一行，含失敗，永不重寫
+
+`data_as_of` 一律從 payload 的日期欄位取得，**不用系統時鐘推定**；
+無法唯一判定時記為 `null` 並寫下原因（`multiple_dates_in_payload` /
+`date_field_missing` / `date_unparsable` / `invalid_json` …）。
+
+儲存位置：`./data/raw`（已 gitignore）。P3 換成 Supabase + RLS 時只換
+`SnapshotStore` 實作，抓取層不動。
 
 ## 免責
 
