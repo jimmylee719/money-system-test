@@ -48,12 +48,20 @@ describe.skipIf(!LIVE)('live contract — 真實官方端點', () => {
         // 每一列的欄位組合一致
         expect(s.heterogeneousRowCount).toBe(0);
 
-        // data_as_of 來自 payload 且可解析
-        expect(s.dataAsOfReason).toBe('single_date_in_payload');
+        // data_as_of 依來源宣告的規則解析成功
+        expect(['single_date_in_payload', 'max_date_in_payload']).toContain(s.dataAsOfReason);
         expect(s.dataAsOf).toMatch(/^\d{4}-\d{2}-\d{2}$/);
 
         // 資料日期不得晚於抓取日期
-        expect(s.dataAsOf!.localeCompare(s.fetchedAt.slice(0, 10))).toBeLessThanOrEqual(0);
+        expect((s.dataAsOf ?? '').localeCompare(s.fetchedAt.slice(0, 10))).toBeLessThanOrEqual(0);
+
+        // 有宣告 periodField 的來源，data_period 必須解析成功且不晚於 data_as_of
+        if (source.periodField !== null) {
+          expect(s.dataPeriod).toMatch(/^\d{4}-\d{2}$/);
+          expect((s.dataPeriod ?? '').localeCompare((s.dataAsOf ?? '').slice(0, 7))).toBeLessThanOrEqual(0);
+        } else {
+          expect(s.dataPeriod).toBe(null);
+        }
       },
       60_000,
     );

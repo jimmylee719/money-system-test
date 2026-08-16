@@ -32,6 +32,9 @@ for (const result of results) {
   const s = result.snapshot;
   console.log(`${result.status === 'stored' ? '✓' : '=' } ${s.sourceId}  [${result.status}]`);
   console.log(`    data_as_of   : ${s.dataAsOf ?? 'null'}  (${s.dataAsOfReason})`);
+  if (s.dataPeriod !== null) {
+    console.log(`    data_period  : ${s.dataPeriod}`);
+  }
   console.log(`    fetched_at   : ${s.fetchedAt}`);
   console.log(`    content_hash : ${s.contentHash.slice(0, 16)}…`);
   console.log(`    bytes / rows : ${s.contentLength} / ${s.rowCount ?? 'n/a'}`);

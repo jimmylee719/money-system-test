@@ -11,16 +11,17 @@
 |---|---|---|
 | P0 | 成本／損益兩平模組 | ✅ 完成 |
 | P1 | L0 抓 TWSE/TPEx | ✅ 完成 |
-| P2 | L0 擴充 MOPS/TAIFEX | 未開始 |
+| P2 | L0 擴充 MOPS/TAIFEX | ✅ 完成 |
+| P3 | append-only 上 Supabase + drift | 未開始 |
 | … | 見 CLAUDE.md Phase 順序 | |
 
 ## 指令
 
 ```bash
 npm install
-npm test            # 80 個離線測試（不碰網路）
+npm test            # 107 個離線測試（不碰網路）
 npm run typecheck
-npm run l0:ingest   # 實際連線抓取，存到 ./data/raw
+npm run l0:ingest   # 實際連線抓取 13 個來源，存到 ./data/raw
 ```
 
 對真實官方端點的契約測試預設跳過，手動執行：
@@ -65,28 +66,68 @@ $env:L0_LIVE='1'; npx vitest run src/lib/l0/__tests__/live-contract.test.ts
 
 ⚠️ 本系統禁止當沖。`day_trade` 模式僅供成本比較，任何呼叫都會回傳 warning。
 
-## P1 模組：`src/lib/l0`
+## 環境變數
+
+`.env.local` 存實際金鑰，**已被 gitignore 排除，不會上傳**。
+`.env.example` 是範本（只放假值，會進版控）。填寫指引寫在 `.env.local` 檔內。
+
+## L0 資料層：`src/lib/l0`（P1 行情 + P2 MOPS/TAIFEX）
 
 L0 鐵則：**只存不判斷**。原始回應逐位元組保存，不清洗、不篩選、不改欄位名、
-不修正官方錯字（櫃買 `LatesAskPrice` 少一個 t，照抄）。
+不修正官方怪癖：
+
+- 櫃買行情 `LatesAskPrice`（少一個 t）
+- TWSE 重大訊息 `"主旨 "`（結尾帶一個空格；櫃買的 `"主旨"` 則沒有）
+- 櫃買基本資料 `UnifiedBusinessNo.`、`Paidin.Capital.NTDollars`（帶點）
 
 | 檔案 | 用途 |
 |---|---|
 | `sources.ts` | 已實測驗證的端點註冊表 + 基準欄位 |
 | `roc-date.ts` | 民國年 ↔ 西元（`"1150814"` → `"2026-08-14"`） |
+| `date-formats.ts` | 多格式日期解析（西元壓縮、民國年月），格式由來源事先宣告 |
 | `snapshot.ts` | payload 觀察、SHA-256、schema drift 比對 |
 | `fetcher.ts` | HTTP 抓取，fetch／時鐘／sleep 皆注入，可離線測試 |
 | `file-store.ts` | append-only 檔案儲存 |
 | `ingest.ts` | 編排：依序抓取 + 禮貌延遲，單一來源失敗不中斷其他 |
 
-### 已驗證端點（2026-08-16 實測，每季覆核）
+### 已驗證端點（13 個，2026-08-16 實測，每季覆核）
 
-| SourceId | 端點 |
-|---|---|
-| `twse_stock_day_all` | `https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL` |
-| `twse_bwibbu_all` | `https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL` |
-| `tpex_mainboard_daily_close_quotes` | `https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes` |
-| `tpex_mainboard_peratio_analysis` | `https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis` |
+端點目錄來源：
+[TWSE](https://openapi.twse.com.tw/v1/swagger.json)（143 個）／
+[TPEx](https://www.tpex.org.tw/openapi/swagger.json)（225 個）／
+[TAIFEX](https://openapi.taifex.com.tw/swagger.json)（135 個）。
+
+| SourceId | 內容 | 給哪個 Phase 用 |
+|---|---|---|
+| `twse_stock_day_all` | 上市個股日成交資訊 | P5 價量因子／P9 報酬 |
+| `twse_bwibbu_all` | 上市本益比／殖利率／淨值比 | P5 評價因子 |
+| `tpex_mainboard_daily_close_quotes` | 上櫃每日收盤行情 | P5 價量因子／P9 報酬 |
+| `tpex_mainboard_peratio_analysis` | 上櫃本益比／殖利率／淨值比 | P5 評價因子 |
+| `mops_twse_monthly_revenue` | 上市月營收 | P5 營收動能 |
+| `mops_tpex_monthly_revenue` | 上櫃月營收 | P5 營收動能 |
+| `mops_twse_company_profile` | 上市公司基本資料 | P5 分群／P6 規模門檻 |
+| `mops_tpex_company_profile` | 上櫃股票基本資料 | P5 分群／P6 規模門檻 |
+| `mops_twse_material_announcements` | 上市每日重大訊息 | P6 L2 事件過濾 |
+| `mops_tpex_material_announcements` | 上櫃每日重大訊息 | P6 L2 事件過濾 |
+| `taifex_institutional_futures_options` | 三大法人期貨與選擇權 | P6 L2 市場環境 |
+| `taifex_put_call_ratio` | 臺指選擇權 Put/Call 比 | P6 L2 市場情緒 |
+| `taifex_large_traders_futures` | 期貨大額交易人未沖銷部位 | P6 L2 市場環境 |
+
+### 日期規則：三個欄位不可混為一談
+
+| 欄位 | 來源 | 例 |
+|---|---|---|
+| `fetched_at` | 系統時鐘 | 2026-08-16T00:46:01Z |
+| `data_as_of` | payload 的日期欄位 | 2026-08-15（月營收出表日） |
+| `data_period` | payload 的期間欄位 | 2026-07（營收所屬月份） |
+
+月營收在 **8/15 才公布 7 月的數字**。把 `data_period` 當成 `data_as_of` 用，
+就是拿未來資訊解釋過去股價（前視偏誤）。
+
+日期格式與選取規則**由來源事先宣告**，不從資料內容猜測：
+
+- `dateFormat`：`roc_compact`（`"1150814"`）／`ad_compact`（TAIFEX 的 `"20260814"`）
+- `dateSelection`：`unique`（單日快照）／`max`（滾動視窗，如 PutCallRatio 一次回 23 天）
 
 ### append-only 怎麼保證
 
