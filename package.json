@@ -20,7 +20,8 @@
     "l1:verify-picks": "tsx scripts/verify-picks.ts",
     "l2:verify": "tsx scripts/verify-veto-events.ts",
     "l3:register": "tsx scripts/register-risk-config.ts",
-    "l3:verify": "tsx scripts/verify-risk-config.ts"
+    "l3:verify": "tsx scripts/verify-risk-config.ts",
+    "l4:verify": "tsx scripts/verify-user-records.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

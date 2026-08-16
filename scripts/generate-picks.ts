@@ -11,7 +11,14 @@
  * ⚠️ 本程式不印出任何金鑰內容。
  */
 
-import { loadEnvFileIfPresent, loadSupabaseConfig } from '../src/lib/config/env';
+import {
+  hasLineConfig,
+  loadEnvFileIfPresent,
+  loadLineConfig,
+  loadSupabaseConfig,
+} from '../src/lib/config/env';
+import { LineClient } from '../src/lib/l4/line/client';
+import { buildDailyReport } from '../src/lib/l4/line/report';
 import { DefinitionLockError, checkDefinitionLock } from '../src/lib/factors/lock';
 import { FactorRegistry } from '../src/lib/factors/registry';
 import { Postgrest } from '../src/lib/l0/supabase-store';
@@ -60,6 +67,8 @@ import type { TradeSignalFields } from '../src/lib/l1/picks';
 const args = process.argv.slice(2);
 const WRITE = args.includes('--write') || process.env['PICKS_WRITE'] === 'yes';
 const REVISION = Number(args.find((a) => a.startsWith('--revision='))?.split('=')[1] ?? '1');
+/** --notify 才推播 LINE。日報內容直接來自本次計算結果，與寫入資料庫的是同一份。 */
+const NOTIFY = args.includes('--notify');
 
 /**
  * twse_margin_balance 的 payload 沒有日期欄位（L0 實測），
@@ -548,6 +557,40 @@ if (scores.length > 0) {
     `\n合成分數：最高 ${scores[0]!.toFixed(4)}｜中位 ${scores[Math.floor(scores.length / 2)]!.toFixed(4)}｜` +
       `最低 ${scores[scores.length - 1]!.toFixed(4)}｜與最高分同分者 ${tiedAtTop} 檔`,
   );
+}
+
+// ── LINE 日報 ────────────────────────────────────────────────────────────────
+//
+// 內容直接來自本次計算結果，與寫進資料庫的是**同一份**——
+// 若改成事後從資料庫重讀重算，兩邊就可能不一致而沒人發現。
+const reportText = buildDailyReport({
+  dataAsOf,
+  ranking: result,
+  watchlist: top,
+  veto: vetoResult,
+  risk: riskResult,
+  historyDays: history.length,
+  volMinObservations: ACTIVE_RISK_CONFIG.volMinObservations,
+  entriesThisMonth,
+  monthlyEntryCap: ACTIVE_RISK_CONFIG.monthlyEntryCap,
+});
+
+console.log('\n--- LINE 日報內容 ---');
+console.log(reportText);
+console.log(`--- 共 ${reportText.length} 字 ---`);
+
+if (NOTIFY) {
+  if (!hasLineConfig()) {
+    console.log('\n✗ 未設定 LINE 環境變數，略過推播。');
+    console.log('  需要 LINE_CHANNEL_ACCESS_TOKEN／LINE_CHANNEL_SECRET／LINE_USER_ID');
+  } else {
+    const line = loadLineConfig();
+    await new LineClient({ channelAccessToken: line.channelAccessToken }).pushText(
+      line.userId,
+      reportText,
+    );
+    console.log('\n✓ 已推播 LINE 日報');
+  }
 }
 
 // ── 寫入 ─────────────────────────────────────────────────────────────────────

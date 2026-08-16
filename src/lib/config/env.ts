@@ -74,6 +74,62 @@ export function loadSupabaseConfig(env: NodeJS.ProcessEnv = process.env): Supaba
   };
 }
 
+export interface LineConfig {
+  readonly channelAccessToken: string;
+  readonly channelSecret: string;
+  /** 推播對象。v1 只推給你自己一個人。 */
+  readonly userId: string;
+}
+
+/**
+ * 讀取 LINE 設定；缺漏時拋錯，錯誤訊息只含變數名稱，不含值。
+ *
+ * ⚠️ 這三個值都是憑證，永遠不會被印出來。
+ *    外洩時請到 LINE Developers Console 立即重新產生。
+ */
+export function loadLineConfig(env: NodeJS.ProcessEnv = process.env): LineConfig {
+  const channelAccessToken = read(env, 'LINE_CHANNEL_ACCESS_TOKEN');
+  const channelSecret = read(env, 'LINE_CHANNEL_SECRET');
+  const userId = read(env, 'LINE_USER_ID');
+
+  const missing: string[] = [];
+  if (channelAccessToken === null) missing.push('LINE_CHANNEL_ACCESS_TOKEN');
+  if (channelSecret === null) missing.push('LINE_CHANNEL_SECRET');
+  if (userId === null) missing.push('LINE_USER_ID');
+  if (channelAccessToken === null || channelSecret === null || userId === null) {
+    throw new MissingEnvError(missing);
+  }
+
+  // LINE 的 user ID 一律以 U 開頭 + 32 碼十六進位。
+  // 事先檢查可以避免把日報推到不存在的對象而只看到一個 400。
+  if (!/^U[0-9a-f]{32}$/.test(userId)) {
+    throw new RangeError(
+      'LINE_USER_ID 格式不正確：應為 U 開頭加 32 碼十六進位字元。' +
+        '（那是「你的 User ID」，不是 channel ID，也不是 LINE ID）',
+    );
+  }
+
+  return { channelAccessToken, channelSecret, userId };
+}
+
+/** LINE 是否已設定（未設定時日報推播會略過，不讓整條管線失敗） */
+export function hasLineConfig(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (
+    read(env, 'LINE_CHANNEL_ACCESS_TOKEN') !== null &&
+    read(env, 'LINE_CHANNEL_SECRET') !== null &&
+    read(env, 'LINE_USER_ID') !== null
+  );
+}
+
+/** 可安全印出的 LINE 設定摘要——只有長度，沒有內容。 */
+export function describeLineConfig(config: LineConfig): string {
+  return (
+    `access_token=${config.channelAccessToken.length} 字元 | ` +
+    `channel_secret=${config.channelSecret.length} 字元 | ` +
+    `user_id=${config.userId.slice(0, 3)}…（${config.userId.length} 字元）`
+  );
+}
+
 /** Supabase 是否已設定（用來決定要走本機檔案還是資料庫） */
 export function hasSupabaseConfig(env: NodeJS.ProcessEnv = process.env): boolean {
   return (

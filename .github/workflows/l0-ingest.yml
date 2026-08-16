@@ -78,7 +78,11 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: npm run l1:picks -- --write
+          # LINE 未設定時只會略過推播，不會讓整條管線失敗
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_CHANNEL_SECRET: ${{ secrets.LINE_CHANNEL_SECRET }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+        run: npm run l1:picks -- --write --notify
 
       # 排序若因「非重複寫入」以外的原因失敗，要看得見，但不影響執行紀錄提交
       - name: Report watchlist outcome
