@@ -36,7 +36,8 @@
     "llm:eval": "tsx scripts/llm-eval.ts",
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "llm:smoke": "tsx scripts/llm-smoke.ts"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
