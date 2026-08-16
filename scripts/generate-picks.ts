@@ -49,6 +49,13 @@ import {
   normalizeTwseSuspension,
 } from '../src/lib/l2/normalize';
 import { RULE_SPEC_BY_ID } from '../src/lib/l2/rules';
+import { RISK_CONFIG_V1 } from '../src/lib/l3/config';
+import { applyRiskLimits } from '../src/lib/l3/engine';
+import { RiskConfigLockError, checkRiskConfigLock, hashRiskConfig } from '../src/lib/l3/lock';
+import type { RegisteredRiskConfig } from '../src/lib/l3/lock';
+import { estimateDailyVolatility } from '../src/lib/l3/volatility';
+import type { DailyVolatility } from '../src/lib/l3/volatility';
+import type { TradeSignalFields } from '../src/lib/l1/picks';
 
 const args = process.argv.slice(2);
 const WRITE = args.includes('--write') || process.env['PICKS_WRITE'] === 'yes';
@@ -62,8 +69,13 @@ const REVISION = Number(args.find((a) => a.startsWith('--revision='))?.split('='
  */
 const SAME_RUN_TOLERANCE_MS = 6 * 60 * 60 * 1000;
 
-/** 五日反轉需要 6 個交易日（t 與 t-5） */
-const HISTORY_DAYS = 6;
+/**
+ * 需要回溯幾個交易日。取兩個需求的較大者：
+ *   - 五日反轉因子：6 天（t 與 t−5）
+ *   - L3 波動率估計：volMinObservations + 1 天
+ * 由設定推導，不寫死——改了設定就自動跟著改。
+ */
+const HISTORY_DAYS = Math.max(6, RISK_CONFIG_V1.volMinObservations + 1);
 
 loadEnvFileIfPresent();
 const config = loadSupabaseConfig();
@@ -111,6 +123,30 @@ if (lockIssues.length > 0) {
 console.log(
   `定義鎖定檢查：${V1_FACTORS.length}/${V1_FACTORS.length} 個因子的 definition_hash、` +
     '假設方向、t 門檻與登記內容完全一致，且皆未封存',
+);
+
+// 風控設定同樣要自證未被動過。風控被偷改比因子被偷改嚴重得多：
+// 因子調錯只是訊號變差，風控調錯是直接爆倉。
+const registeredRiskConfigs = (await (async (): Promise<readonly RegisteredRiskConfig[]> => {
+  const res = await fetch(`${config.url}/rest/v1/risk_config?select=*`, {
+    headers: { apikey: config.serviceRoleKey, Authorization: `Bearer ${config.serviceRoleKey}` },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) {
+    throw new Error(`讀取 risk_config 失敗：HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
+  }
+  return (await res.json()) as readonly RegisteredRiskConfig[];
+})());
+
+const riskIssues = checkRiskConfigLock(RISK_CONFIG_V1, registeredRiskConfigs);
+if (riskIssues.length > 0) {
+  throw new RiskConfigLockError(riskIssues);
+}
+const riskConfigHash = hashRiskConfig(RISK_CONFIG_V1);
+console.log(
+  `風控設定鎖定檢查：${RISK_CONFIG_V1.version} 的雜湊與登記內容一致` +
+    `（${riskConfigHash.slice(0, 16)}…）｜資金 ${RISK_CONFIG_V1.equityTwd.toLocaleString()} 元、` +
+    `每筆風險 ${RISK_CONFIG_V1.riskPerTradePct}%`,
 );
 
 // ── 載入當日快照（載入時會重算 content_hash，不符即拋錯） ────────────────────
@@ -375,8 +411,121 @@ for (const decision of vetoResult.vetoed.filter((v) => top.some((s) => s.code ==
   console.log(`      官方原文：${decision.evidence.slice(0, 120)}`);
 }
 
+// ── L3 風控層 ────────────────────────────────────────────────────────────────
+//
+// 硬上限，無例外。輸入是 L2 通過者，且**依排名順序**——額度有限時先給名次高的。
+console.log('\n--- L3 風控層 ---');
+
+// 波動率由對齊交易日的歷史序列估計；停牌造成的缺口不會被當成一日報酬
+const volatilityByCode = new Map<string, DailyVolatility>();
+for (const [code, series] of ctx.historyByCode) {
+  volatilityByCode.set(
+    code,
+    estimateDailyVolatility(
+      series.map((q) => q?.close ?? null),
+      RISK_CONFIG_V1.volEwmSpan,
+      RISK_CONFIG_V1.volMinObservations,
+    ),
+  );
+}
+const withVol = [...volatilityByCode.values()].filter((v) => v.sigmaDaily !== null).length;
+console.log(
+  `波動率可估的檔數：${withVol}/${volatilityByCode.size}` +
+    `（需要 ${RISK_CONFIG_V1.volMinObservations} 筆日報酬，目前系統有 ${history.length} 個交易日）`,
+);
+
+// 當月已進場筆數：直接由 daily_picks 的 trade_signal 統計，不另外維護一張表
+const monthStart = `${dataAsOf.slice(0, 7)}-01`;
+const entriesThisMonth = await (async (): Promise<number> => {
+  const res = await fetch(
+    `${config.url}/rest/v1/daily_picks?select=id&list_kind=eq.trade_signal` +
+      `&data_as_of=gte.${monthStart}&data_as_of=lte.${dataAsOf}&revision=lt.1000`,
+    {
+      headers: {
+        apikey: config.serviceRoleKey,
+        Authorization: `Bearer ${config.serviceRoleKey}`,
+        Prefer: 'count=exact',
+      },
+      signal: AbortSignal.timeout(30_000),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(`統計當月進場筆數失敗：HTTP ${res.status}`);
+  }
+  return ((await res.json()) as unknown[]).length;
+})();
+
+// ⚠️ v1 不下單，尚無實際部位與淨值，故持倉數與回撤傳 0。
+//    熔斷規則已實作並測試，但要等 P9 有 outcomes 之後才真正生效。
+const riskResult = applyRiskLimits(
+  vetoResult.passed,
+  {
+    signalDate: dataAsOf,
+    volatilityByCode,
+    entriesThisMonth,
+    openPositions: 0,
+    currentExposurePct: 0,
+    drawdownPct: 0,
+  },
+  RISK_CONFIG_V1,
+);
+
+console.log(
+  `當月已進場 ${entriesThisMonth}/${RISK_CONFIG_V1.monthlyEntryCap} 筆｜` +
+    '持倉數與淨值回撤傳 0（v1 不下單，熔斷待 P9 outcomes 才生效）',
+);
+
+if (riskResult.haltedGlobally) {
+  console.log(`✗ 全域限制觸發：${riskResult.haltReason}`);
+  console.log('  當日一律 0 檔，沒有例外。');
+} else {
+  console.log(
+    `L2 通過 ${vetoResult.passed.length} 檔 → L3 核准 ${riskResult.approved.length} 檔`,
+  );
+  const order: string[] = Object.keys(riskResult.countsByReason).sort(
+    (a, b) => (riskResult.countsByReason[b] ?? 0) - (riskResult.countsByReason[a] ?? 0),
+  );
+  for (const reason of order) {
+    console.log(`  ${reason.padEnd(28)} ${String(riskResult.countsByReason[reason]).padStart(5)} 檔`);
+  }
+}
+
+console.log(`\n--- 交易訊號（${dataAsOf}）---`);
+if (riskResult.approved.length === 0) {
+  console.log('0 檔。');
+  console.log('⚠️  0 檔是正常且健康的（CLAUDE.md），但要分清楚是「沒有標的通過」還是「資料不足」：');
+  const volUnavailable = riskResult.countsByReason['volatility_unavailable'] ?? 0;
+  if (volUnavailable > 0) {
+    console.log(
+      `    本次 ${volUnavailable} 檔是因為波動率估不出來——` +
+        `系統目前只有 ${history.length} 個交易日，需要 ${RISK_CONFIG_V1.volMinObservations + 1} 個。`,
+    );
+    console.log('    這是資料累積不足，不是市場沒有機會。屏障不得用固定百分比代替。');
+  }
+} else {
+  for (const [i, s] of riskResult.approved.entries()) {
+    console.log(
+      `${i + 1}. ${s.stock.code} ${s.stock.name}（${s.stock.market}）　進場 ${s.barrier.entryPrice}`,
+    );
+    console.log(
+      `     停損 ${s.barrier.stopPrice.toFixed(2)}　停利 ${s.barrier.takeProfitPrice.toFixed(2)}　` +
+        `時間出場 ${s.barrier.timeExitDays} 個交易日`,
+    );
+    console.log(
+      `     ${s.position.lots} 張｜部位 ${Math.round(s.position.positionValueTwd).toLocaleString()} 元` +
+        `（${s.position.positionPct.toFixed(1)}%）｜名目風險 ${Math.round(s.position.riskAmountTwd).toLocaleString()} 元` +
+        `｜日波動 ${(s.sigmaDaily * 100).toFixed(2)}%`,
+    );
+    console.log(
+      `     扣成本後：停利 ${s.position.outcome.takeProfit.rMultiple.toFixed(2)}R　` +
+        `停損 ${s.position.outcome.stopLoss.rMultiple.toFixed(2)}R`,
+    );
+  }
+}
+
 console.log(`\n--- 觀察榜 Top ${top.length}（${dataAsOf}）---`);
-console.log('⚠️  這是研究紀錄，不是買進建議。交易訊號須通過 L2 否決與 L3 風控（尚未實作）。\n');
+console.log('⚠️  這是研究紀錄，不是買進建議。觀察榜依排名產生，不受 L2 否決與 L3 風控影響——');
+console.log('    那正是衡量 L2／L3 的對照組。可執行的東西只有上面那份交易訊號。\n');
 for (const [i, stock] of top.entries()) {
   console.log(
     `${i + 1}. ${stock.code} ${stock.name}（${stock.market}）　收盤 ${stock.close}　` +
@@ -453,5 +602,43 @@ const vetoRows = buildVetoRows({
 });
 await new VetoEventWriter(registryClient).insert(vetoRows);
 console.log(`✓ 已寫入 veto_events：${vetoRows.length} 筆否決紀錄`);
-console.log('  兩張表皆為 append-only，此後不可修改或刪除。');
+
+// 交易訊號：0 檔時不寫任何列，那是正常狀態
+if (riskResult.approved.length > 0) {
+  const signalFields = new Map<string, TradeSignalFields>(
+    riskResult.approved.map((s) => [
+      s.stock.code,
+      {
+        entryPrice: s.barrier.entryPrice,
+        stopPrice: s.barrier.stopPrice,
+        takeProfitPrice: s.barrier.takeProfitPrice,
+        timeExitDays: s.barrier.timeExitDays,
+        lots: s.position.lots,
+        shares: s.position.shares,
+        positionValueTwd: s.position.positionValueTwd,
+        riskAmountTwd: s.position.riskAmountTwd,
+        sigmaDaily: s.sigmaDaily,
+        volObservations: s.volObservations,
+        equityAtSignalTwd: RISK_CONFIG_V1.equityTwd,
+        riskConfigVersion: RISK_CONFIG_V1.version,
+        riskConfigHash: riskConfigHash,
+      },
+    ]),
+  );
+  const signalRows = buildPickRows({
+    result,
+    stocks: riskResult.approved.map((s) => s.stock),
+    listKind: 'trade_signal',
+    runId,
+    revision: REVISION,
+    signalAt,
+    signalFields,
+  });
+  await writer.insert(signalRows);
+  console.log(`✓ 已寫入 daily_picks 交易訊號：${signalRows.length} 列`);
+} else {
+  console.log('· 交易訊號 0 檔，未寫入任何列（0 檔是正常狀態）');
+}
+
+console.log('  以上皆為 append-only，此後不可修改或刪除。');
 process.exit(0);

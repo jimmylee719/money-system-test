@@ -37,6 +37,44 @@ export interface DailyPickRow {
   readonly universe_size: number;
   readonly tradable_count: number;
   readonly ranked_count: number;
+
+  // ── 交易訊號專屬。觀察榜一律不帶（資料庫 constraint 強制）。 ──
+  readonly entry_price?: number;
+  readonly stop_price?: number;
+  readonly take_profit_price?: number;
+  readonly time_exit_days?: number;
+  readonly lots?: number;
+  readonly shares?: number;
+  readonly position_value_twd?: number;
+  readonly risk_amount_twd?: number;
+  readonly sigma_daily?: number;
+  readonly vol_observations?: number;
+  readonly equity_at_signal_twd?: number;
+  readonly risk_config_version?: string;
+  readonly risk_config_hash?: string;
+}
+
+/**
+ * 交易訊號專屬欄位。觀察榜一律不帶（資料庫 constraint 會強制）。
+ *
+ * 【為什麼一定要分開】
+ * 觀察榜是研究紀錄，交易訊號是可執行的東西。兩者混淆的後果，
+ * 是把「我們在觀察這檔」誤讀成「系統叫我買這檔」。
+ */
+export interface TradeSignalFields {
+  readonly entryPrice: number;
+  readonly stopPrice: number;
+  readonly takeProfitPrice: number;
+  readonly timeExitDays: number;
+  readonly lots: number;
+  readonly shares: number;
+  readonly positionValueTwd: number;
+  readonly riskAmountTwd: number;
+  readonly sigmaDaily: number;
+  readonly volObservations: number;
+  readonly equityAtSignalTwd: number;
+  readonly riskConfigVersion: string;
+  readonly riskConfigHash: string;
 }
 
 export interface BuildPickRowsInput {
@@ -47,6 +85,11 @@ export interface BuildPickRowsInput {
   readonly revision: number;
   /** 產生清單當下的系統時鐘讀數（ISO） */
   readonly signalAt: string;
+  /**
+   * code → 交易訊號欄位。`listKind === 'trade_signal'` 時每一檔都必須有，
+   * 缺任一檔即拋錯——寧可不寫，也不要寫出一筆沒有停損的「交易訊號」。
+   */
+  readonly signalFields?: ReadonlyMap<string, TradeSignalFields>;
 }
 
 /**
@@ -56,28 +99,59 @@ export interface BuildPickRowsInput {
  * 否則就可以事後把某一檔說成當時排第一。
  */
 export function buildPickRows(input: BuildPickRowsInput): readonly DailyPickRow[] {
-  const { result, stocks, listKind, runId, revision, signalAt } = input;
-  return stocks.map((stock, i) => ({
-    run_id: runId,
-    revision,
-    data_as_of: result.dataAsOf,
-    signal_at: signalAt,
-    list_kind: listKind,
-    rank: i + 1,
-    code: stock.code,
-    market: stock.market,
-    name: stock.name,
-    price_at_push: stock.close,
-    composite_score: stock.compositeScore,
-    real_factor_count: stock.realFactorCount,
-    factor_scores: stock.factorScores,
-    engine_version: result.engineVersion,
-    active_factors: result.activeFactors,
-    inactive_factors: result.inactiveFactors,
-    universe_size: result.universeSize,
-    tradable_count: result.tradableCount,
-    ranked_count: result.rankedCount,
-  }));
+  const { result, stocks, listKind, runId, revision, signalAt, signalFields } = input;
+
+  return stocks.map((stock, i) => {
+    const base = {
+      run_id: runId,
+      revision,
+      data_as_of: result.dataAsOf,
+      signal_at: signalAt,
+      list_kind: listKind,
+      rank: i + 1,
+      code: stock.code,
+      market: stock.market,
+      name: stock.name,
+      price_at_push: stock.close,
+      composite_score: stock.compositeScore,
+      real_factor_count: stock.realFactorCount,
+      factor_scores: stock.factorScores,
+      engine_version: result.engineVersion,
+      active_factors: result.activeFactors,
+      inactive_factors: result.inactiveFactors,
+      universe_size: result.universeSize,
+      tradable_count: result.tradableCount,
+      ranked_count: result.rankedCount,
+    };
+
+    if (listKind === 'watchlist') {
+      return base;
+    }
+
+    const f = signalFields?.get(stock.code);
+    if (f === undefined) {
+      throw new Error(
+        `交易訊號 ${stock.code} 缺少屏障與部位資料。` +
+          '沒有停損價的「交易訊號」不是訊號，是賭博——寧可不寫。',
+      );
+    }
+    return {
+      ...base,
+      entry_price: f.entryPrice,
+      stop_price: f.stopPrice,
+      take_profit_price: f.takeProfitPrice,
+      time_exit_days: f.timeExitDays,
+      lots: f.lots,
+      shares: f.shares,
+      position_value_twd: f.positionValueTwd,
+      risk_amount_twd: f.riskAmountTwd,
+      sigma_daily: f.sigmaDaily,
+      vol_observations: f.volObservations,
+      equity_at_signal_twd: f.equityAtSignalTwd,
+      risk_config_version: f.riskConfigVersion,
+      risk_config_hash: f.riskConfigHash,
+    };
+  });
 }
 
 export class DailyPicksWriter {
