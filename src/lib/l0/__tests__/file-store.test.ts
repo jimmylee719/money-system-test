@@ -97,6 +97,8 @@ describe('FileSnapshotStore — append-only', () => {
       bodyPath: store.bodyPathFor(s1),
       error: null,
       snapshot: s1,
+      fieldsAdded: [],
+      fieldsRemoved: [],
     });
     await store.put(s2, enc(BODY));
     await store.appendManifest({
@@ -109,6 +111,8 @@ describe('FileSnapshotStore — append-only', () => {
       bodyPath: store.bodyPathFor(s2),
       error: null,
       snapshot: s2,
+      fieldsAdded: [],
+      fieldsRemoved: [],
     });
 
     const manifest = await store.readManifest();

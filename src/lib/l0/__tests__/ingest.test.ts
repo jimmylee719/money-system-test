@@ -52,6 +52,33 @@ describe('ingestSource', () => {
     expect(manifest.map((m) => m.status)).toEqual(['stored', 'duplicate']);
   });
 
+  it('records schema drift against the registry baseline', async () => {
+    // payload 只有 Date/Code 兩欄，且多出一個註冊表沒有的 SurpriseColumn
+    const drifted = JSON.stringify([{ Date: '1150814', Code: '1101', SurpriseColumn: 'x' }]);
+    const { deps } = makeDeps(() => new Response(drifted, { status: 200 }));
+
+    await ingestSource(TWSE_STOCK_DAY_ALL, deps, store);
+
+    const entry = (await store.readManifest())[0];
+    expect(entry?.fieldsAdded).toEqual(['SurpriseColumn']);
+    expect(entry?.fieldsRemoved).toContain('ClosingPrice');
+    expect(entry?.fieldsRemoved).toContain('TradeVolume');
+    expect(entry?.fieldsRemoved).not.toContain('Date');
+  });
+
+  it('records no drift when the payload matches the baseline exactly', async () => {
+    const exact = JSON.stringify([
+      Object.fromEntries(TWSE_STOCK_DAY_ALL.baselineFields.map((f) => [f, f === 'Date' ? '1150814' : ''])),
+    ]);
+    const { deps } = makeDeps(() => new Response(exact, { status: 200 }));
+
+    await ingestSource(TWSE_STOCK_DAY_ALL, deps, store);
+
+    const entry = (await store.readManifest())[0];
+    expect(entry?.fieldsAdded).toEqual([]);
+    expect(entry?.fieldsRemoved).toEqual([]);
+  });
+
   it('records a failure in the manifest instead of silently skipping', async () => {
     const { deps } = makeDeps(() => new Response('down', { status: 500 }));
 

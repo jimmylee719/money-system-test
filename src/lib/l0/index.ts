@@ -63,6 +63,25 @@ export {
 export { FileSnapshotStore, MANIFEST_FILENAME, UNKNOWN_DATE_DIR } from './file-store';
 
 export {
+  Postgrest,
+  PostgrestError,
+  RAW_SNAPSHOTS_TABLE,
+  SOURCE_HEALTH_TABLE,
+  SupabaseSnapshotStore,
+  deriveHealthStatus,
+  toRawSnapshotRow,
+  toSourceHealthRow,
+} from './supabase-store';
+export type {
+  BodyStoreKind,
+  PostgrestClient,
+  PostgrestOptions,
+  RawSnapshotRow,
+  SourceHealthRow,
+  SourceHealthStatus,
+} from './supabase-store';
+
+export {
   DEFAULT_INGEST_OPTIONS,
   createLiveDeps,
   ingestAll,

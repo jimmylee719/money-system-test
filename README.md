@@ -12,16 +12,19 @@
 | P0 | 成本／損益兩平模組 | ✅ 完成 |
 | P1 | L0 抓 TWSE/TPEx | ✅ 完成 |
 | P2 | L0 擴充 MOPS/TAIFEX | ✅ 完成 |
-| P3 | append-only 上 Supabase + drift | 未開始 |
+| P3 | append-only 上 Supabase + drift | ✅ 完成 |
+| P4 | factor_registry | 未開始 |
 | … | 見 CLAUDE.md Phase 順序 | |
 
 ## 指令
 
 ```bash
 npm install
-npm test            # 107 個離線測試（不碰網路）
+npm test                  # 135 個離線測試（不碰網路）
 npm run typecheck
-npm run l0:ingest   # 實際連線抓取 13 個來源，存到 ./data/raw
+npm run l0:ingest         # 抓 13 個來源，存本機 + Supabase 帳本
+npm run l0:verify         # 實測 append-only 三道鎖擋得住
+npm run l0:verify-drift   # 實測 schema drift 偵測整條鏈有效
 ```
 
 對真實官方端點的契約測試預設跳過，手動執行：
@@ -129,12 +132,52 @@ L0 鐵則：**只存不判斷**。原始回應逐位元組保存，不清洗、�
 - `dateFormat`：`roc_compact`（`"1150814"`）／`ad_compact`（TAIFEX 的 `"20260814"`）
 - `dateSelection`：`unique`（單日快照）／`max`（滾動視窗，如 PutCallRatio 一次回 23 天）
 
-### append-only 怎麼保證
+### append-only 怎麼保證（本機檔案層）
 
 1. 檔名就是內容的 SHA-256 → 內容一變必然是不同檔案，不可能覆蓋舊資料
 2. 寫入用 `flag: 'wx'`（存在即失敗），不用 `'w'`
 3. `FileSnapshotStore` **沒有** delete / update 方法（有測試斷言這件事）
 4. `manifest.jsonl` 每次抓取追加一行，含失敗，永不重寫
+
+## P3：Supabase append-only 帳本 + drift
+
+SQL 在 `supabase/migrations/0001_l0_append_only.sql`（貼到 Supabase SQL Editor 執行）。
+
+### 為什麼不是只靠 RLS
+
+[Supabase 官方文件](https://supabase.com/docs/guides/database/postgres/row-level-security)明載
+service 金鑰的用途是繞過 RLS，而**抓取排程正是以 service_role key 寫入**。
+只做 RLS 等於只鎖住訪客，我們自己的程式仍能改寫歷史資料。因此上三道鎖：
+
+| 鎖 | 機制 | 擋誰 | 實測證據 |
+|---|---|---|---|
+| 一 | RLS policy（只給 SELECT） | anon / authenticated | anon INSERT → `violates row-level security policy` |
+| 二 | `REVOKE UPDATE, DELETE, TRUNCATE` | 連 service_role 也擋 | service_role UPDATE/DELETE → HTTP 403 `42501 permission denied` |
+| 三 | `BEFORE UPDATE/DELETE/TRUNCATE` 觸發器報錯 | 權限被誤 grant 回來也擋 | SQL Editor 以擁有者身分實測 3/3 被擋 |
+
+鎖三必須單獨測：從程式端走 service_role 時會先被鎖二擋掉，觸發器根本不會執行。
+`supabase/verify/verify_triggers.sql` 以資料表擁有者身分執行，把鎖三隔離出來驗證。
+
+### 資料表
+
+| 表 | 內容 |
+|---|---|
+| `raw_snapshots` | 每次抓取一列（含內容未變的重複抓取）。存中繼資料與 `content_hash`，**不存原始 bytes** |
+| `source_health` | 每次抓取一列。記錄 schema drift、列結構不一致、日期無法判定、抓取失敗 |
+
+原始 bytes 留在檔案儲存：櫃買單日就 4.1 MB，13 個來源每日約 6.5 MB，
+塞進資料庫兩個多月就撐爆免費額度。資料庫存 `content_hash` 當指紋，兩邊可互相稽核。
+
+`inserted_at` 由資料庫 `default now()` 蓋章，應用程式無法指定。
+
+### 驗證指令
+
+- `npm run l0:verify` — 用真實的 service_role / anon key 去試改、試刪，證明被擋
+- `npm run l0:verify-drift` — 故意在基準欄位塞一個官方不存在的欄位，
+  證明 drift 被偵測到並寫成 `status = 'schema_drift'`
+
+兩支都會留下**永遠刪不掉的探針資料**（`source_id` 以 `__` 開頭），
+這本身就是 append-only 生效的證據。後續各層一律以來源白名單查詢，不會讀到它們。
 
 `data_as_of` 一律從 payload 的日期欄位取得，**不用系統時鐘推定**；
 無法唯一判定時記為 `null` 並寫下原因（`multiple_dates_in_payload` /

@@ -148,6 +148,10 @@ export interface ManifestEntry {
   readonly bodyPath: string | null;
   readonly error: string | null;
   readonly snapshot: RawSnapshot | null;
+  /** 相對註冊表基準欄位，本次多出來的欄位（schema drift） */
+  readonly fieldsAdded: readonly string[];
+  /** 相對註冊表基準欄位，本次少掉的欄位（schema drift） */
+  readonly fieldsRemoved: readonly string[];
 }
 
 export interface PutResult {

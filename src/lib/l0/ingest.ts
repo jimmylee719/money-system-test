@@ -6,6 +6,7 @@
  */
 
 import { DEFAULT_FETCH_OPTIONS, DEFAULT_POLITENESS_DELAY_MS, fetchSource } from './fetcher';
+import { diffFields } from './snapshot';
 import { ALL_SOURCES } from './sources';
 import type {
   FetchOptions,
@@ -44,6 +45,9 @@ export async function ingestSource(
       bodyPath: null,
       error: result.error,
       snapshot: null,
+      // 抓取失敗時無從比對欄位，不假裝「沒有 drift」
+      fieldsAdded: [],
+      fieldsRemoved: [],
     } as const;
     await store.appendManifest(entry);
     return {
@@ -57,6 +61,7 @@ export async function ingestSource(
 
   const put = await store.put(result.snapshot, result.body);
   const status = put.written ? 'stored' : 'duplicate';
+  const drift = diffFields(source.baselineFields, result.snapshot.observedFields);
 
   await store.appendManifest({
     sourceId: source.id,
@@ -68,6 +73,8 @@ export async function ingestSource(
     bodyPath: put.bodyPath,
     error: null,
     snapshot: result.snapshot,
+    fieldsAdded: drift.added,
+    fieldsRemoved: drift.removed,
   });
 
   return {

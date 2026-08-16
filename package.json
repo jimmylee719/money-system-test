@@ -8,7 +8,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "l0:ingest": "tsx scripts/l0-ingest.ts"
+    "l0:ingest": "tsx scripts/l0-ingest.ts",
+    "l0:verify": "tsx scripts/verify-append-only.ts",
+    "l0:verify-drift": "tsx scripts/verify-drift.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
