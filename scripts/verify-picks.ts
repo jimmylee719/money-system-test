@@ -21,9 +21,31 @@ import { loadEnvFileIfPresent, loadSupabaseConfig } from '../src/lib/config/env'
 loadEnvFileIfPresent();
 const config = loadSupabaseConfig();
 
-/** 探針專用的 revision 區段。真實清單一律 revision < 1000。 */
-const PROBE_REVISION = 900_000 + (Number(process.hrtime.bigint() % 90_000n) || 1);
 const PROBE_DATE = '2026-08-14'; // L0 開始累積的第一天，constraint 的下界
+
+/**
+ * 探針專用的 revision（真實清單一律 < 1000）。
+ *
+ * ⚠️ 2026-08-16：原本用 `process.hrtime.bigint() % 90000` 取號，實測會撞號——
+ *    Windows 計時器精度不足以保證兩次執行落在不同餘數，撞到就會誤報失敗。
+ *    改為查目前最大的探針號 +1。
+ */
+async function nextProbeRevision(): Promise<number> {
+  const res = await fetch(
+    `${config.url}/rest/v1/daily_picks?revision=gte.900000&select=revision&order=revision.desc&limit=1`,
+    {
+      headers: { apikey: config.serviceRoleKey, Authorization: `Bearer ${config.serviceRoleKey}` },
+      signal: AbortSignal.timeout(30_000),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(`查詢探針號失敗：HTTP ${res.status}`);
+  }
+  const rows = (await res.json()) as { revision: number }[];
+  return Math.max(900_000, (rows[0]?.revision ?? 900_000) + 1);
+}
+
+const PROBE_REVISION = await nextProbeRevision();
 
 interface ApiResponse {
   readonly status: number;

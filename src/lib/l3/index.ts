@@ -1,7 +1,7 @@
 /** P7 — L3 風控層 public API */
 
 export type { RiskConfig } from './config';
-export { RISK_CONFIG_V1, validateRiskConfig } from './config';
+export { ACTIVE_RISK_CONFIG, RISK_CONFIG_V1, RISK_CONFIG_V2, validateRiskConfig } from './config';
 
 export type { DailyVolatility } from './volatility';
 export { estimateDailyVolatility, ewmStd, logReturns } from './volatility';

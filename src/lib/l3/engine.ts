@@ -41,7 +41,11 @@ export type RiskRejectReason =
   /** 單一部位金額超過上限 */
   | 'exceeds_single_position_cap'
   /** 停利價未達損益兩平，數學上不可能獲利 */
-  | 'target_below_breakeven';
+  | 'target_below_breakeven'
+  /** 扣成本後賠率低於 1:1（部位太小，固定手續費吃光優勢） */
+  | 'odds_below_one'
+  /** 當日買進金額預算已用完 */
+  | 'daily_buy_budget';
 
 export interface RiskRejection {
   readonly code: string;
@@ -141,6 +145,8 @@ export function applyRiskLimits(
   let openPositions = ctx.openPositions;
   let exposurePct = ctx.currentExposurePct;
   let entriesThisMonth = ctx.entriesThisMonth;
+  // 當日買進金額預算。null 代表不設限。
+  let dailyBudgetLeft = config.dailyBuyBudgetTwd;
 
   const reject = (code: string, reason: RiskRejectReason, detail: string): void => {
     rejected.push({ code, reason, detail });
@@ -219,6 +225,20 @@ export function applyRiskLimits(
       continue;
     }
 
+    // 每日買進金額上限：這是**額外**的限制，只會讓買進變少。
+    // ⚠️ 刻意不做「砍到剛好用完預算」——那會讓實際風險偏離設定的 r。
+    //    寧可整筆跳過，也不要一筆風險說不清楚的部位。
+    if (dailyBudgetLeft !== null && sized.position.positionValueTwd > dailyBudgetLeft) {
+      reject(
+        stock.code,
+        'daily_buy_budget',
+        `此部位需 ${Math.round(sized.position.positionValueTwd).toLocaleString()} 元，` +
+          `當日剩餘買進預算只有 ${Math.round(dailyBudgetLeft).toLocaleString()} 元。` +
+          '不縮小部位去湊預算——縮了實際風險就不再等於設定的 r。',
+      );
+      continue;
+    }
+
     approved.push({
       stock,
       barrier,
@@ -229,6 +249,9 @@ export function applyRiskLimits(
     exposurePct += sized.position.positionPct;
     openPositions += 1;
     entriesThisMonth += 1;
+    if (dailyBudgetLeft !== null) {
+      dailyBudgetLeft -= sized.position.positionValueTwd;
+    }
   }
 
   const result: RiskResult = {

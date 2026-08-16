@@ -2,8 +2,8 @@
  * 產生每日觀察榜：`npm run l1:picks`（只算不寫）／`npm run l1:picks -- --write`
  *
  * ⚠️ **觀察榜是研究紀錄，不是買進建議**（CLAUDE.md）。
- *    交易訊號必須另外通過 L2 否決與 L3 風控，那兩層還沒做，
- *    因此本腳本目前只產生 watchlist，不產生任何 trade_signal。
+ *    觀察榜依 L1 排名產生，**不受 L2 否決與 L3 風控影響**——那正是衡量兩層的對照組。
+ *    可執行的只有 trade_signal：必須同時通過 L2 與 L3，且經常是 0 檔。
  *
  * ⚠️ 預設是 dry-run。daily_picks 是 append-only，寫進去就改不掉，
  *    所以「先看數字，確認無誤才寫」是預設行為，不是選項。
@@ -49,7 +49,7 @@ import {
   normalizeTwseSuspension,
 } from '../src/lib/l2/normalize';
 import { RULE_SPEC_BY_ID } from '../src/lib/l2/rules';
-import { RISK_CONFIG_V1 } from '../src/lib/l3/config';
+import { ACTIVE_RISK_CONFIG } from '../src/lib/l3/config';
 import { applyRiskLimits } from '../src/lib/l3/engine';
 import { RiskConfigLockError, checkRiskConfigLock, hashRiskConfig } from '../src/lib/l3/lock';
 import type { RegisteredRiskConfig } from '../src/lib/l3/lock';
@@ -75,7 +75,7 @@ const SAME_RUN_TOLERANCE_MS = 6 * 60 * 60 * 1000;
  *   - L3 波動率估計：volMinObservations + 1 天
  * 由設定推導，不寫死——改了設定就自動跟著改。
  */
-const HISTORY_DAYS = Math.max(6, RISK_CONFIG_V1.volMinObservations + 1);
+const HISTORY_DAYS = Math.max(6, ACTIVE_RISK_CONFIG.volMinObservations + 1);
 
 loadEnvFileIfPresent();
 const config = loadSupabaseConfig();
@@ -138,15 +138,15 @@ const registeredRiskConfigs = (await (async (): Promise<readonly RegisteredRiskC
   return (await res.json()) as readonly RegisteredRiskConfig[];
 })());
 
-const riskIssues = checkRiskConfigLock(RISK_CONFIG_V1, registeredRiskConfigs);
+const riskIssues = checkRiskConfigLock(ACTIVE_RISK_CONFIG, registeredRiskConfigs);
 if (riskIssues.length > 0) {
   throw new RiskConfigLockError(riskIssues);
 }
-const riskConfigHash = hashRiskConfig(RISK_CONFIG_V1);
+const riskConfigHash = hashRiskConfig(ACTIVE_RISK_CONFIG);
 console.log(
-  `風控設定鎖定檢查：${RISK_CONFIG_V1.version} 的雜湊與登記內容一致` +
-    `（${riskConfigHash.slice(0, 16)}…）｜資金 ${RISK_CONFIG_V1.equityTwd.toLocaleString()} 元、` +
-    `每筆風險 ${RISK_CONFIG_V1.riskPerTradePct}%`,
+  `風控設定鎖定檢查：${ACTIVE_RISK_CONFIG.version} 的雜湊與登記內容一致` +
+    `（${riskConfigHash.slice(0, 16)}…）｜資金 ${ACTIVE_RISK_CONFIG.equityTwd.toLocaleString()} 元、` +
+    `每筆風險 ${ACTIVE_RISK_CONFIG.riskPerTradePct}%`,
 );
 
 // ── 載入當日快照（載入時會重算 content_hash，不符即拋錯） ────────────────────
@@ -423,15 +423,15 @@ for (const [code, series] of ctx.historyByCode) {
     code,
     estimateDailyVolatility(
       series.map((q) => q?.close ?? null),
-      RISK_CONFIG_V1.volEwmSpan,
-      RISK_CONFIG_V1.volMinObservations,
+      ACTIVE_RISK_CONFIG.volEwmSpan,
+      ACTIVE_RISK_CONFIG.volMinObservations,
     ),
   );
 }
 const withVol = [...volatilityByCode.values()].filter((v) => v.sigmaDaily !== null).length;
 console.log(
   `波動率可估的檔數：${withVol}/${volatilityByCode.size}` +
-    `（需要 ${RISK_CONFIG_V1.volMinObservations} 筆日報酬，目前系統有 ${history.length} 個交易日）`,
+    `（需要 ${ACTIVE_RISK_CONFIG.volMinObservations} 筆日報酬，目前系統有 ${history.length} 個交易日）`,
 );
 
 // 當月已進場筆數：直接由 daily_picks 的 trade_signal 統計，不另外維護一張表
@@ -467,11 +467,11 @@ const riskResult = applyRiskLimits(
     currentExposurePct: 0,
     drawdownPct: 0,
   },
-  RISK_CONFIG_V1,
+  ACTIVE_RISK_CONFIG,
 );
 
 console.log(
-  `當月已進場 ${entriesThisMonth}/${RISK_CONFIG_V1.monthlyEntryCap} 筆｜` +
+  `當月已進場 ${entriesThisMonth}/${ACTIVE_RISK_CONFIG.monthlyEntryCap} 筆｜` +
     '持倉數與淨值回撤傳 0（v1 不下單，熔斷待 P9 outcomes 才生效）',
 );
 
@@ -498,7 +498,7 @@ if (riskResult.approved.length === 0) {
   if (volUnavailable > 0) {
     console.log(
       `    本次 ${volUnavailable} 檔是因為波動率估不出來——` +
-        `系統目前只有 ${history.length} 個交易日，需要 ${RISK_CONFIG_V1.volMinObservations + 1} 個。`,
+        `系統目前只有 ${history.length} 個交易日，需要 ${ACTIVE_RISK_CONFIG.volMinObservations + 1} 個。`,
     );
     console.log('    這是資料累積不足，不是市場沒有機會。屏障不得用固定百分比代替。');
   }
@@ -619,8 +619,8 @@ if (riskResult.approved.length > 0) {
         riskAmountTwd: s.position.riskAmountTwd,
         sigmaDaily: s.sigmaDaily,
         volObservations: s.volObservations,
-        equityAtSignalTwd: RISK_CONFIG_V1.equityTwd,
-        riskConfigVersion: RISK_CONFIG_V1.version,
+        equityAtSignalTwd: ACTIVE_RISK_CONFIG.equityTwd,
+        riskConfigVersion: ACTIVE_RISK_CONFIG.version,
         riskConfigHash: riskConfigHash,
       },
     ]),

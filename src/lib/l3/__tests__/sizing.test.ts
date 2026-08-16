@@ -1,123 +1,194 @@
 import { describe, expect, it } from 'vitest';
 import { computeBarriers } from '../barriers';
-import { RISK_CONFIG_V1, validateRiskConfig } from '../config';
+import { ACTIVE_RISK_CONFIG, RISK_CONFIG_V1, RISK_CONFIG_V2, validateRiskConfig } from '../config';
+import type { RiskConfig } from '../config';
 import { sizePosition } from '../sizing';
 
-const BROKER = RISK_CONFIG_V1.broker;
+const C = ACTIVE_RISK_CONFIG;
 const TRADE_DATE = '2026-08-17';
 
-function size(entryPrice: number, sigmaDaily: number, equityTwd = 1_000_000, maxSinglePct = 20) {
+function size(
+  entryPrice: number,
+  sigmaDaily: number,
+  over: Partial<Pick<RiskConfig, 'equityTwd' | 'maxSinglePositionPct' | 'lotSize' | 'riskPerTradePct'>> = {},
+) {
+  const cfg = { ...C, ...over };
   return sizePosition({
     barrier: computeBarriers({
       entryPrice,
       sigmaDaily,
-      holdingDays: RISK_CONFIG_V1.holdingDays,
-      stopSigmaMultiple: RISK_CONFIG_V1.stopSigmaMultiple,
-      takeProfitR: RISK_CONFIG_V1.takeProfitR,
+      holdingDays: cfg.holdingDays,
+      stopSigmaMultiple: cfg.stopSigmaMultiple,
+      takeProfitR: cfg.takeProfitR,
     }),
-    equityTwd,
-    riskPerTradePct: RISK_CONFIG_V1.riskPerTradePct,
-    lotSize: RISK_CONFIG_V1.lotSize,
-    maxSinglePositionPct: maxSinglePct,
-    broker: BROKER,
+    equityTwd: cfg.equityTwd,
+    riskPerTradePct: cfg.riskPerTradePct,
+    lotSize: cfg.lotSize,
+    maxSinglePositionPct: cfg.maxSinglePositionPct,
+    broker: cfg.broker,
     tradeDate: TRADE_DATE,
   });
 }
 
-describe('部位大小', () => {
-  it('手算驗證：100 萬 × 1% ÷ 每股風險 12.6491 = 790 股 → 不足 1 張，拒絕', () => {
-    // 進場 100、σ=2% → 每股風險 12.6491
-    // 風險預算 10,000 ÷ 12.6491 = 790.6 股 = 0 張
-    const r = size(100, 0.02);
-    expect(r.position).toBeNull();
-    expect(r.rejectReason).toBe('below_one_lot');
-    expect(r.detail).toContain('不足 1 張');
-  });
+/** 實際虧損（正數） */
+function actualLoss(r: ReturnType<typeof size>): number {
+  return -Number(r.position!.outcome.stopLoss.netPnl.twd);
+}
+function actualWin(r: ReturnType<typeof size>): number {
+  return Number(r.position!.outcome.takeProfit.netPnl.twd);
+}
 
-  it('低價低波動股才買得到整張：進場 20、σ=1%', () => {
-    // 每股風險 = 20 × 2 × 0.01 × √10 = 1.2649
-    // 10,000 ÷ 1.2649 = 7,905 股 → 7 張
-    const r = size(20, 0.01);
+describe('r 是真正的硬上限：實際虧損含成本後仍不超過預算', () => {
+  // 這是 2026-08-16 修正的核心。v1 只用名目風險反解股數，
+  // 停損時的實際虧損（名目 + 來回成本）每次都會超出預算。
+  const cases: readonly { entry: number; sigma: number; equity: number }[] = [
+    { entry: 50, sigma: 0.02, equity: 10_000 },
+    { entry: 100, sigma: 0.02, equity: 10_000 },
+    { entry: 1000, sigma: 0.02, equity: 10_000 },
+    { entry: 500, sigma: 0.03, equity: 10_000 },
+    { entry: 50, sigma: 0.02, equity: 30_000 },
+    { entry: 50, sigma: 0.02, equity: 100_000 },
+    { entry: 33.5, sigma: 0.017, equity: 20_000 },
+  ];
+
+  for (const { entry, sigma, equity } of cases) {
+    it(`進場 ${entry}、σ=${(sigma * 100).toFixed(1)}%、資金 ${equity.toLocaleString()}`, () => {
+      const r = size(entry, sigma, { equityTwd: equity, maxSinglePositionPct: 100 });
+      expect(r.position, r.detail).not.toBeNull();
+      const budget = (equity * C.riskPerTradePct) / 100;
+      expect(actualLoss(r)).toBeLessThanOrEqual(budget);
+    });
+  }
+
+  it('若把成本忽略掉，實際虧損就會超出預算（證明這個修正是必要的）', () => {
+    // 用 v1 的做法反解：不計成本
+    const barrier = computeBarriers({
+      entryPrice: 50,
+      sigmaDaily: 0.02,
+      holdingDays: C.holdingDays,
+      stopSigmaMultiple: C.stopSigmaMultiple,
+      takeProfitR: C.takeProfitR,
+    });
+    const budget = 200;
+    const naiveShares = Math.floor(budget / barrier.riskPerShare); // 31 股
+    const correct = size(50, 0.02, { maxSinglePositionPct: 100 });
+    // 正確解必定比不計成本的解更小
+    expect(correct.position!.shares).toBeLessThan(naiveShares);
+    // 而且正確解的實際虧損在預算內
+    expect(actualLoss(correct)).toBeLessThanOrEqual(budget);
+  });
+});
+
+describe('零股：高價股也買得到', () => {
+  it('進場 1000 元的股票買 1 股，不再是「買不起」', () => {
+    const r = size(1000, 0.02);
     expect(r.position).not.toBeNull();
-    expect(r.position!.lots).toBe(7);
-    expect(r.position!.shares).toBe(7000);
-    // 部位金額 = 7000 × 20 = 140,000 → 14%
-    expect(r.position!.positionValueTwd).toBeCloseTo(140_000, 6);
-    expect(r.position!.positionPct).toBeCloseTo(14, 6);
+    expect(r.position!.shares).toBe(1);
+    expect(r.position!.positionValueTwd).toBe(1000);
   });
 
-  it('名目風險不得超過風險預算（無條件捨去到整張，只會更小）', () => {
-    const r = size(20, 0.01);
-    const budget = (1_000_000 * RISK_CONFIG_V1.riskPerTradePct) / 100;
-    expect(r.position!.riskAmountTwd).toBeLessThanOrEqual(budget);
-  });
-
-  it('不足 1 張時拒絕，不會湊成 1 張（湊了就不是硬上限）', () => {
-    const r = size(500, 0.03);
+  it('lotSize=1000（只買整張）時，同一檔就變成買不起', () => {
+    const r = size(1000, 0.02, { lotSize: 1000 });
     expect(r.position).toBeNull();
     expect(r.rejectReason).toBe('below_one_lot');
   });
 
-  it('低波動股會算出極大張數，被單一部位上限擋下', () => {
-    // 進場 20、σ=0.2% → 每股風險 0.253，10,000 ÷ 0.253 = 39,528 股 = 39 張
-    // 部位 = 39,000 × 20 = 780,000 = 78%，遠超 20% 上限
+  it('手算錨點：進場 50、σ=2%、資金 1 萬 → 24 股', () => {
+    // 每股風險 = 50 × 2 × 0.02 × √10 = 6.3246
+    // 不計成本：200 ÷ 6.3246 = 31.6 股；計入來回成本後收斂到 24 股
+    const r = size(50, 0.02);
+    expect(r.position!.shares).toBe(24);
+    expect(r.position!.positionValueTwd).toBe(1200);
+    expect(actualLoss(r)).toBeLessThanOrEqual(200);
+  });
+});
+
+describe('賠率必須大於 1:1', () => {
+  it('部位太小導致賠率低於 1:1 → 拒絕', () => {
+    // 資金 5,000 → 部位僅數百元 → 買賣各 20 元的最低手續費吃光 2:1 的優勢
+    const r = size(50, 0.02, { equityTwd: 5000 });
+    expect(r.position).toBeNull();
+    expect(r.rejectReason).toBe('odds_below_one');
+    expect(r.detail).toContain('低於 1 : 1');
+  });
+
+  it('資金再小一點連損益兩平都到不了，會先被 target_below_breakeven 擋下', () => {
+    const r = size(50, 0.02, { equityTwd: 3000 });
+    expect(r.position).toBeNull();
+    expect(r.rejectReason).toBe('target_below_breakeven');
+  });
+
+  it('實測門檻：進場 50、σ=2% 時，資金約 7,000 元以上才過得了賠率檢查', () => {
+    // 這個數字是實跑出來的，不是訂出來的門檻——
+    // 它會隨股價與波動而變，所以不寫進設定，由規則自然決定。
+    expect(size(50, 0.02, { equityTwd: 6000 }).rejectReason).toBe('odds_below_one');
+    expect(size(50, 0.02, { equityTwd: 7000 }).position).not.toBeNull();
+  });
+
+  it('通過的部位，實得必定大於實虧', () => {
+    for (const equity of [10_000, 30_000, 100_000]) {
+      const r = size(50, 0.02, { equityTwd: equity, maxSinglePositionPct: 100 });
+      expect(actualWin(r), `資金 ${equity}`).toBeGreaterThan(actualLoss(r));
+    }
+  });
+
+  it('資金越大賠率越好（固定手續費的稀釋效應遞減）', () => {
+    const odds = (equity: number): number => {
+      const r = size(50, 0.02, { equityTwd: equity, maxSinglePositionPct: 100 });
+      return actualWin(r) / actualLoss(r);
+    };
+    expect(odds(10_000)).toBeLessThan(odds(30_000));
+    expect(odds(30_000)).toBeLessThan(odds(100_000));
+    // 名目賠率是 2:1，扣成本後永遠達不到
+    expect(odds(100_000)).toBeLessThan(2);
+  });
+});
+
+describe('單一部位上限', () => {
+  it('低波動股的停損距離短，會算出極大部位並被上限擋下', () => {
     const r = size(20, 0.002);
     expect(r.position).toBeNull();
     expect(r.rejectReason).toBe('exceeds_single_position_cap');
-    expect(r.detail).toContain('78');
-  });
-
-  it('資金變大張數跟著變大，但因整張捨去而非嚴格成正比', () => {
-    // 100 萬：10,000 ÷ 1.2649 = 7,905.7 股 → 7 張（捨去 0.9 張）
-    // 300 萬：30,000 ÷ 1.2649 = 23,717.1 股 → 23 張（捨去 0.7 張）
-    // 23 ≠ 21 —— 捨去的比例每次不同，所以資金三倍不等於張數剛好三倍。
-    // 這是「只買整張」的必然結果，不是錯誤；實際風險只會比預算小，不會更大。
-    const small = size(20, 0.01, 1_000_000, 100);
-    const big = size(20, 0.01, 3_000_000, 100);
-    expect(small.position!.lots).toBe(7);
-    expect(big.position!.lots).toBe(23);
-    expect(big.position!.lots).toBeGreaterThanOrEqual(small.position!.lots * 3);
-
-    // 兩者的名目風險都必須在各自的預算之內
-    expect(small.position!.riskAmountTwd).toBeLessThanOrEqual(10_000);
-    expect(big.position!.riskAmountTwd).toBeLessThanOrEqual(30_000);
-  });
-
-  it('停利價的淨損益必須為正，且回報扣成本後的真實 R', () => {
-    const r = size(20, 0.01);
-    expect(r.position!.outcome.takeProfit.netPnl.cents).toBeGreaterThan(0n);
-    // 名目 2R，扣掉手續費與證交稅後必然小於 2
-    expect(r.position!.outcome.takeProfit.rMultiple).toBeLessThan(2);
-    expect(r.position!.outcome.takeProfit.rMultiple).toBeGreaterThan(1.5);
-  });
-
-  it('停損觸發時的實際虧損比名目 1R 更大（成本讓虧損那端變糟）', () => {
-    const r = size(20, 0.01);
-    expect(r.position!.outcome.stopLoss.rMultiple).toBeLessThan(-1);
+    // 零股模式下訊息不該出現「張」
+    expect(r.detail).toContain('股');
+    expect(r.detail).not.toContain('張');
   });
 });
 
 describe('風控設定的健全性', () => {
-  it('v1 設定本身通過檢查', () => {
+  it('v1 與 v2 本身都通過檢查', () => {
     expect(validateRiskConfig(RISK_CONFIG_V1)).toEqual([]);
+    expect(validateRiskConfig(RISK_CONFIG_V2)).toEqual([]);
+  });
+
+  it('目前生效的是 v2', () => {
+    expect(ACTIVE_RISK_CONFIG.version).toBe('risk-v2');
+    expect(ACTIVE_RISK_CONFIG.lotSize).toBe(1); // 允許零股
   });
 
   it('r 超出 CLAUDE.md 的 1%–2% 會被擋', () => {
-    expect(validateRiskConfig({ ...RISK_CONFIG_V1, riskPerTradePct: 5 })[0]).toContain('1%–2%');
+    expect(validateRiskConfig({ ...C, riskPerTradePct: 5 })[0]).toContain('1%–2%');
   });
 
   it('停利低於 2R 會被擋', () => {
-    expect(validateRiskConfig({ ...RISK_CONFIG_V1, takeProfitR: 1.5 })[0]).toContain('≥2R');
+    expect(validateRiskConfig({ ...C, takeProfitR: 1.5 })[0]).toContain('≥2R');
   });
 
-  it('熔斷門檻若低於「同時全部停損」的損失，會被擋 —— 否則熔斷正常情況就觸發', () => {
-    const issues = validateRiskConfig({ ...RISK_CONFIG_V1, circuitBreakerDrawdownPct: 4 });
-    expect(issues.join()).toContain('熔斷會在正常情況下就觸發');
+  it('熔斷門檻若低於「同時全部停損」的損失，會被擋', () => {
+    expect(validateRiskConfig({ ...C, circuitBreakerDrawdownPct: 5 }).join()).toContain(
+      '熔斷會在正常情況下就觸發',
+    );
   });
 
-  it('v1 的最壞同時損失（5 檔 × 1% = 5%）確實低於熔斷門檻 15%', () => {
-    const worst = RISK_CONFIG_V1.maxConcurrentPositions * RISK_CONFIG_V1.riskPerTradePct;
-    expect(worst).toBe(5);
-    expect(worst).toBeLessThan(RISK_CONFIG_V1.circuitBreakerDrawdownPct);
+  it('v2 的最壞同時損失（3 檔 × 2% = 6%）仍明顯低於熔斷門檻 15%', () => {
+    const worst = C.maxConcurrentPositions * C.riskPerTradePct;
+    expect(worst).toBe(6);
+    expect(worst * 2).toBeLessThan(C.circuitBreakerDrawdownPct);
+  });
+
+  it('每日買進上限若有設定必須為正數', () => {
+    expect(validateRiskConfig({ ...C, dailyBuyBudgetTwd: 0 })[0]).toContain('dailyBuyBudgetTwd');
+    expect(validateRiskConfig({ ...C, dailyBuyBudgetTwd: 5000 })).toEqual([]);
+    expect(validateRiskConfig({ ...C, dailyBuyBudgetTwd: null })).toEqual([]);
   });
 });

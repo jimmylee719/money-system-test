@@ -15,16 +15,37 @@
  */
 
 import { loadEnvFileIfPresent, loadSupabaseConfig } from '../src/lib/config/env';
-import { RISK_CONFIG_V1 } from '../src/lib/l3/config';
+import { ACTIVE_RISK_CONFIG } from '../src/lib/l3/config';
 import { hashRiskConfig } from '../src/lib/l3/lock';
 
 loadEnvFileIfPresent();
 const config = loadSupabaseConfig();
 
-/** 探針用的 revision 區段；真實清單一律 < 1000 */
-const PROBE_REVISION = 900_000 + (Number(process.hrtime.bigint() % 90_000n) || 7);
 const PROBE_DATE = '2026-08-14';
 const PROBE_RUN = '00000000-0000-4000-8000-000000000003';
+
+/**
+ * 探針用的 revision（真實清單一律 < 1000）。
+ *
+ * ⚠️ 2026-08-16：原本用 `process.hrtime.bigint() % 90000` 取號，實測會撞號——
+ *    Windows 的計時器精度不足以保證兩次執行落在不同餘數，
+ *    結果對照組被唯一索引擋下而誤報失敗。
+ *    改為查目前最大的探針號 +1，確定不重複。
+ */
+async function nextProbeRevision(): Promise<number> {
+  const res = await fetch(
+    `${config.url}/rest/v1/daily_picks?revision=gte.900000&select=revision&order=revision.desc&limit=1`,
+    {
+      headers: { apikey: config.serviceRoleKey, Authorization: `Bearer ${config.serviceRoleKey}` },
+      signal: AbortSignal.timeout(30_000),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(`查詢探針號失敗：HTTP ${res.status}`);
+  }
+  const rows = (await res.json()) as { revision: number }[];
+  return Math.max(900_000, (rows[0]?.revision ?? 900_000) + 1);
+}
 
 interface ApiResponse {
   readonly status: number;
@@ -142,6 +163,8 @@ function signalRow(overrides: Record<string, unknown> = {}): Record<string, unkn
   };
 }
 
+const PROBE_REVISION = await nextProbeRevision();
+
 console.log('=== L3 風控守門驗證 ===\n');
 console.log(`探針 revision = ${PROBE_REVISION}（真實清單一律 < 1000）\n`);
 
@@ -165,13 +188,13 @@ async function selectRows<T>(pathAndQuery: string): Promise<readonly T[]> {
 }
 
 // ── risk_config：登記內容與程式一致 ─────────────────────────────────────────
-const localHash = hashRiskConfig(RISK_CONFIG_V1);
+const localHash = hashRiskConfig(ACTIVE_RISK_CONFIG);
 const registeredRows = await selectRows<{ config_hash: string }>(
-  `risk_config?version=eq.${encodeURIComponent(RISK_CONFIG_V1.version)}&select=config_hash`,
+  `risk_config?version=eq.${encodeURIComponent(ACTIVE_RISK_CONFIG.version)}&select=config_hash`,
 );
 const registeredHash = registeredRows[0]?.config_hash ?? null;
 record(
-  `風控設定 ${RISK_CONFIG_V1.version} 已登記且雜湊與程式一致`,
+  `風控設定 ${ACTIVE_RISK_CONFIG.version} 已登記且雜湊與程式一致`,
   registeredHash === localHash,
   registeredHash === null
     ? '⚠️ 尚未登記。先跑 npm run l3:register'
@@ -182,7 +205,7 @@ record(
 await expectRejected(
   '事後放寬每筆風險比例（UPDATE risk_config）',
   'PATCH',
-  `risk_config?version=eq.${RISK_CONFIG_V1.version}`,
+  `risk_config?version=eq.${ACTIVE_RISK_CONFIG.version}`,
   { config_hash: 'a'.repeat(64) },
   '42501',
   'permission denied',
@@ -191,7 +214,7 @@ await expectRejected(
 await expectRejected(
   '刪除風控設定紀錄（DELETE risk_config）',
   'DELETE',
-  `risk_config?version=eq.${RISK_CONFIG_V1.version}`,
+  `risk_config?version=eq.${ACTIVE_RISK_CONFIG.version}`,
   undefined,
   '42501',
   'permission denied',

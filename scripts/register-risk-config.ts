@@ -12,22 +12,30 @@
 import { createInterface } from 'node:readline/promises';
 import { loadEnvFileIfPresent, loadSupabaseConfig } from '../src/lib/config/env';
 import { Postgrest } from '../src/lib/l0/supabase-store';
-import { RISK_CONFIG_V1, validateRiskConfig } from '../src/lib/l3/config';
+import { ACTIVE_RISK_CONFIG, validateRiskConfig } from '../src/lib/l3/config';
 import { hashRiskConfig } from '../src/lib/l3/lock';
 import type { RegisteredRiskConfig } from '../src/lib/l3/lock';
 
 const RATIONALE =
-  'v1 風控設定，於看到任何一筆損益之前訂定。每個數字皆有推導而非偏好：' +
-  'r=1% 取 CLAUDE.md 規定 1%–2% 的下限；holdingDays=10 為「數日至兩週」的兩週交易日數；' +
-  'volEwmSpan=100 採 López de Prado《AFML》getDailyVol 的預設值；' +
-  'stopSigmaMultiple=2 使停損不被日常波動掃到（1σ 約 32% 機率、2σ 約 5%）；' +
-  'takeProfitR=2 為 CLAUDE.md 規定的下限；maxConcurrentPositions=5 由「可容忍同時全數停損 5%」÷ r 反推；' +
-  'monthlyEntryCap=10 由持有 10 日約半月、一個月週轉 2 次推得；' +
-  'maxSinglePositionPct=20 由「單一個股腰斬時總損失上限 10%」反推；' +
-  'maxTotalExposurePct=60 保留現金以確保熔斷後仍能執行出場；' +
-  'circuitBreakerDrawdownPct=15 為正常最壞情況 5% 的三倍（連續三批部位全滅）；' +
-  'broker 用無折讓的最壞情況，高估成本是安全的方向。' +
-  '總資金 100 萬為使用者指定的假設值，日後調整將以新版本號登記。';
+  'v2 風控設定，2026-08-16 修訂，仍在看到任何一筆損益之前。' +
+  '相對 v1 改四項：(1) equityTwd 100 萬→1 萬，使用者實際資金為 1–3 萬，取下限較安全，' +
+  '低估資金會讓部位偏小、高估則會讓每筆風險超出真實資金比例；' +
+  '(2) riskPerTradePct 1%→2%，CLAUDE.md 允許 1%–2%，小資金應取上限：' +
+  '買賣各 20 元的最低手續費是固定成本，部位越小稀釋越嚴重，' +
+  '實測 1 萬×1% 的實際賠率僅 0.76:1（負期望），1 萬×2% 為 1.33:1；' +
+  '(3) lotSize 1000→1 允許零股，CLAUDE.md 禁止的是零股沖銷而非零股買進，' +
+  'v1 的整張限制是自加的且在小資金下使多數標的無法交易；' +
+  '(4) maxConcurrentPositions 5→3、monthlyEntryCap 10→6，' +
+  '因 r 加倍需維持「同時全數停損」損失遠低於熔斷門檻（3×2%=6% ≪ 15%）。' +
+  '另修正部位公式：改為反解「名目風險＋來回成本 ≤ 預算」的最大股數，' +
+  'v1 僅用名目風險反解，停損實際虧損每次都超出預算（實測 10 萬本金超出 6%），' +
+  'r 因此不是真正的硬上限。並新增規則：扣成本後停利實得須大於停損實虧（賠率>1:1），' +
+  '因目前無任何證據宣稱勝率高於 50%，賠率低於 1:1 即為負期望。' +
+  '其餘（volEwmSpan=100 採 AFML getDailyVol 預設、volMinObservations=20、' +
+  'holdingDays=10 為兩週交易日數、stopSigmaMultiple=2、takeProfitR=2 為 CLAUDE.md 下限、' +
+  'maxSinglePositionPct=20、maxTotalExposurePct=60、circuitBreakerDrawdownPct=15、' +
+  'broker 用無折讓最壞情況）維持 v1 推導不變。' +
+  '使用者實際放 3 萬時須登記 risk-v3，不得沿用本版本。';
 
 loadEnvFileIfPresent();
 const config = loadSupabaseConfig();
@@ -48,15 +56,15 @@ console.log('=== 風控設定登記 ===\n');
 console.log('⚠️  risk_config 為 append-only，登記後不可修改或刪除。');
 console.log('⚠️  要改任何數字必須換 version 重新登記，兩份都會永久留存。\n');
 
-const issues = validateRiskConfig(RISK_CONFIG_V1);
+const issues = validateRiskConfig(ACTIVE_RISK_CONFIG);
 if (issues.length > 0) {
   console.log('✗ 設定本身未通過健全性檢查：');
   for (const i of issues) console.log(`  - ${i}`);
   process.exit(1);
 }
 
-const hash = hashRiskConfig(RISK_CONFIG_V1);
-const c = RISK_CONFIG_V1;
+const hash = hashRiskConfig(ACTIVE_RISK_CONFIG);
+const c = ACTIVE_RISK_CONFIG;
 
 console.log(`version           ${c.version}`);
 console.log(`config_hash       ${hash}\n`);
