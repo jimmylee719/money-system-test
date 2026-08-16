@@ -94,6 +94,15 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: npm run l5:outcomes -- --write
 
+      # 0050 基準指數。G3 的對照依據，每日累積一點。
+      - name: Update benchmark (0050)
+        id: benchmark
+        continue-on-error: true
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run l6:g3 -- --write
+
       # 排序若因「非重複寫入」以外的原因失敗，要看得見，但不影響執行紀錄提交
       - name: Report watchlist outcome
         if: always()
