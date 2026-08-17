@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { VetoLayerViolationError } from '../../engine';
 import { RULE_SPEC_BY_ID } from '../../rules';
 import { applyLlmVetoes } from '../apply';
-import { announcementHash, buildItemKey, parseAnnouncements } from '../announce';
+import { announcementHash, buildItemKey, contentKeyIgnoringDate, parseAnnouncements } from '../announce';
 import { OpenAiCompatibleProvider, StubProvider } from '../provider';
 import { PARAMS_HASH, PROMPT_HASH, PROMPT_VERSION, SYSTEM_PROMPT, buildUserPrompt } from '../prompt';
 import type { LlmTask, LlmVerdict, ModelSpec } from '../types';
@@ -383,5 +383,56 @@ describe('parseAnnouncements — 官方欄位名的差異照抄不修正', () =>
 
   it('非陣列 payload 回空結果而不是拋錯', () => {
     expect(parseAnnouncements({ 資料: [] }, 'TWSE', 's').items).toEqual([]);
+  });
+});
+
+describe('contentKeyIgnoringDate — 連續公告三個月的重複題', () => {
+  // 取自 1721 的實際公告：「依證交所營業細則第45條，於更名後須連續公告三個月」
+  const base = {
+    market: 'TWSE',
+    code: '1721',
+    clause: '第51款',
+    subject: '公告本公司名稱由「三晃股份有限公司」更名為「國慶科技股份有限公司」',
+    detail: '1.事實發生日：民國115年06月29日 2.公司名稱：國慶科技股份有限公司',
+  };
+
+  it('同一則公告換一天發布，itemKey 會變但內容鍵不變', () => {
+    const day1 = parseAnnouncements(
+      [{ 發言日期: '1150815', 公司代號: '1721', '主旨 ': base.subject, 符合條款: base.clause, 說明: base.detail }],
+      'TWSE',
+      's',
+    ).items[0]!;
+    const day2 = parseAnnouncements(
+      [{ 發言日期: '1150818', 公司代號: '1721', '主旨 ': base.subject, 符合條款: base.clause, 說明: base.detail }],
+      'TWSE',
+      's',
+    ).items[0]!;
+
+    // itemKey 不同 → 佇列會各排一次（否決必須每天重新套用，這是對的）
+    expect(day1.itemKey).not.toBe(day2.itemKey);
+    // 內容鍵相同 → 考卷只算一題
+    expect(contentKeyIgnoringDate(day1)).toBe(contentKeyIgnoringDate(day2));
+  });
+
+  it('排版空白不同仍視為同一則', () => {
+    expect(contentKeyIgnoringDate({ ...base, detail: '1.事實發生日：民國115年06月29日\r\n  2.公司名稱：國慶科技股份有限公司' })).toBe(
+      contentKeyIgnoringDate(base),
+    );
+  });
+
+  it('內容改一個字就是不同的一則', () => {
+    expect(contentKeyIgnoringDate({ ...base, detail: `${base.detail}(更正)` })).not.toBe(
+      contentKeyIgnoringDate(base),
+    );
+  });
+
+  it('不同公司的相同格式公告不會被誤判為同一則', () => {
+    expect(contentKeyIgnoringDate({ ...base, code: '3708' })).not.toBe(contentKeyIgnoringDate(base));
+  });
+
+  it('不同市場不會被誤判為同一則', () => {
+    expect(contentKeyIgnoringDate({ ...base, market: 'TPEx' })).not.toBe(
+      contentKeyIgnoringDate(base),
+    );
   });
 });

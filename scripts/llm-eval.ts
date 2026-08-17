@@ -16,6 +16,7 @@
 
 import { loadEnvFileIfPresent, loadSupabaseConfig } from '../src/lib/config/env';
 import { Postgrest } from '../src/lib/l0/supabase-store';
+import { contentKeyIgnoringDate } from '../src/lib/l2/llm/announce';
 import { loadLlmConfig } from '../src/lib/l2/llm/config';
 import {
   MIN_GOLD_SAMPLE,
@@ -129,6 +130,19 @@ if (gold.length < MIN_GOLD_SAMPLE) {
 }
 if (isDegenerate(gold)) {
   console.log('\n✗ 這份考卷的標準答案全部相同，沒有鑑別度，考幾分都沒有意義。');
+  process.exit(1);
+}
+
+// 第三道防重複。匯出端與匯入端都濾過了，這裡是最後一道：
+// 一份混了重複題的考卷，題數看起來合格、鑑別度卻被稀釋，
+// 是所有失效模式裡最難察覺的一種——所以寧可多檢查一次。
+const distinctContent = new Set(gold.map((g) => contentKeyIgnoringDate(g)));
+if (distinctContent.size < gold.length) {
+  console.log(
+    `\n⚠️ 考卷裡有重複題：${gold.length} 題中只有 ${distinctContent.size} 則不同的公告。\n` +
+      '   連續公告三個月的更名／面額變更公告每天都會回來一次，內容相同只有發言日期不同。\n' +
+      '   重複題會稀釋 veto 比例並推高 baseline，成績不可信。請先清理再評測。',
+  );
   process.exit(1);
 }
 

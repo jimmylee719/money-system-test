@@ -13,7 +13,7 @@ export type {
 } from './types';
 export { LOCAL_ENDPOINT_PATTERN, NonLocalEndpointError, assertLocalEndpoint } from './types';
 
-export { announcementHash, buildItemKey, parseAnnouncements } from './announce';
+export { announcementHash, buildItemKey, contentKeyIgnoringDate, parseAnnouncements } from './announce';
 
 export {
   INFERENCE_PARAMS,

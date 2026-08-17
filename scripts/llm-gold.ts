@@ -16,12 +16,13 @@
  * ⚠️ 本程式不印出任何金鑰內容。
  */
 
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 
 import ExcelJS from 'exceljs';
 
 import { loadEnvFileIfPresent, loadSupabaseConfig } from '../src/lib/config/env';
 import { Postgrest } from '../src/lib/l0/supabase-store';
+import { contentKeyIgnoringDate } from '../src/lib/l2/llm/announce';
 import { MIN_GOLD_SAMPLE } from '../src/lib/l2/llm/gold';
 
 const FONT = { name: 'Arial', size: 10 } as const;
@@ -29,15 +30,38 @@ const FONT = { name: 'Arial', size: 10 } as const;
 const args = process.argv.slice(2);
 const EXPORT = args.includes('--export');
 const IMPORT_AT = args.indexOf('--import');
-const IMPORT_PATH = IMPORT_AT >= 0 ? args[IMPORT_AT + 1] : undefined;
 const WRITE = args.includes('--write');
 const LIMIT = Number(args.find((a) => a.startsWith('--limit='))?.split('=')[1] ?? '60');
 
-if (!EXPORT && IMPORT_PATH === undefined) {
+/** 找 gold/ 裡最新的待標註檔。讓每天的指令固定不變，不用手打日期。 */
+function newestPendingFile(): string | undefined {
+  if (!existsSync('gold')) return undefined;
+  const files = readdirSync('gold')
+    .filter((f) => f.startsWith('pending-') && f.endsWith('.xlsx'))
+    .sort();
+  const last = files[files.length - 1];
+  return last === undefined ? undefined : `gold/${last}`;
+}
+
+/** --import 後面沒接路徑（或接的是別的選項）時，自動用最新的那個檔 */
+const IMPORT_ARG = IMPORT_AT >= 0 ? args[IMPORT_AT + 1] : undefined;
+const IMPORT_PATH =
+  IMPORT_AT < 0
+    ? undefined
+    : IMPORT_ARG !== undefined && !IMPORT_ARG.startsWith('--')
+      ? IMPORT_ARG
+      : newestPendingFile();
+
+if (!EXPORT && IMPORT_AT < 0) {
   console.log('用法：');
   console.log('  npm run llm:gold -- --export');
-  console.log('  npm run llm:gold -- --import gold/pending-2026-08-17.xlsx');
+  console.log('  npm run llm:gold -- --import          （自動用 gold/ 裡最新的檔，dry-run）');
+  console.log('  npm run llm:gold -- --import --write   （自動用最新的檔並寫入）');
   console.log('  npm run llm:gold -- --import gold/pending-2026-08-17.xlsx --write');
+  process.exit(1);
+}
+if (IMPORT_AT >= 0 && IMPORT_PATH === undefined) {
+  console.log('✗ gold/ 裡找不到任何 pending-*.xlsx。先跑：npm run llm:gold -- --export');
   process.exit(1);
 }
 
@@ -73,18 +97,56 @@ if (EXPORT) {
   const queued = await select<QueueRow>(
     'llm_queue?task_key=not.like.__probe*&select=*&order=speak_date.desc,id.desc&limit=2000',
   );
-  const labeled = new Set(
-    (
-      await select<{ item_key: string }>('gold_set?item_key=not.like.__probe*&select=item_key&limit=5000')
-    ).map((r) => r.item_key),
-  );
-  const todo = queued.filter((q) => !labeled.has(q.task_key)).slice(0, LIMIT);
+  const goldRows = await select<{
+    item_key: string;
+    code: string;
+    market: string;
+    clause: string;
+    subject: string;
+    detail: string;
+  }>('gold_set?item_key=not.like.__probe*&select=item_key,code,market,clause,subject,detail&limit=5000');
+
+  const labeledKeys = new Set(goldRows.map((r) => r.item_key));
+  // 忽略發言日期的內容鍵：連續公告三個月的公告每天都會回來一次，
+  // 那是同一題，不是新題。詳見 announce.ts 的 contentKeyIgnoringDate。
+  const labeledContent = new Set(goldRows.map((r) => contentKeyIgnoringDate(r)));
+
+  const todo: QueueRow[] = [];
+  const seenInBatch = new Set<string>();
+  let skippedSameKey = 0;
+  let skippedSameContent = 0;
+
+  for (const row of queued) {
+    if (labeledKeys.has(row.task_key)) {
+      skippedSameKey += 1;
+      continue;
+    }
+    const contentKey = contentKeyIgnoringDate(row);
+    if (labeledContent.has(contentKey) || seenInBatch.has(contentKey)) {
+      skippedSameContent += 1;
+      continue;
+    }
+    seenInBatch.add(contentKey);
+    todo.push(row);
+    if (todo.length >= LIMIT) break;
+  }
 
   console.log('=== gold_set 待標註匯出 ===\n');
-  console.log(`佇列 ${queued.length} 則，已標註 ${labeled.size} 則，本次匯出 ${todo.length} 則\n`);
+  console.log(`佇列 ${queued.length} 則　已標註 ${labeledKeys.size} 題　本次匯出 ${todo.length} 題`);
+  if (skippedSameKey > 0) {
+    console.log(`  ├ 略過 ${skippedSameKey} 則：同一則已經標過`);
+  }
+  if (skippedSameContent > 0) {
+    console.log(
+      `  └ 略過 ${skippedSameContent} 則：**內容相同、只有發言日期不同**\n` +
+        '     （更名／面額變更依規定連續公告三個月，會天天回來。同一題只問一次。）',
+    );
+  }
+  console.log('');
 
   if (todo.length === 0) {
-    console.log('沒有待標註的題目。先跑：npm run llm:enqueue -- --write');
+    console.log('沒有新的題目要標。');
+    console.log('若今天還沒抓資料，先跑：npm run llm:enqueue -- --write');
     process.exit(0);
   }
 
@@ -237,14 +299,25 @@ for (const item of entered) {
 }
 
 // 已標過的題目要寫成新 revision，不是覆蓋
-const existing = await select<{ item_key: string; revision: number }>(
-  'gold_set?item_key=not.like.__probe*&select=item_key,revision&limit=5000',
+const existing = await select<{
+  item_key: string;
+  revision: number;
+  code: string;
+  market: string;
+  clause: string;
+  subject: string;
+  detail: string;
+}>(
+  'gold_set?item_key=not.like.__probe*&select=item_key,revision,code,market,clause,subject,detail&limit=5000',
 );
 const maxRevision = new Map<string, number>();
 for (const row of existing) {
   maxRevision.set(row.item_key, Math.max(maxRevision.get(row.item_key) ?? 0, row.revision));
 }
 
+// ⚠️ 先檢查再去重，順序不可對調：
+// 去重要用 byKey.get(item_key) 取原文，而「item_key 找不到」正是上面那組檢查在擋的。
+// 反過來排，遇到打錯的 item_key 會直接拋 undefined 而不是給出可讀的錯誤。
 if (problems.length > 0) {
   console.log('✗ 檔案有問題，未寫入任何資料：');
   for (const p of problems.slice(0, 30)) {
@@ -254,12 +327,50 @@ if (problems.length > 0) {
   process.exit(1);
 }
 
-const vetoCount = entered.filter((e) => e.label === 'veto').length;
-console.log(`標為 veto：${vetoCount} 題　標為 no_veto：${entered.length - vetoCount} 題`);
+/**
+ * 內容重複的擋在這裡。匯出端已經濾過一次，這裡是第二道——
+ * 使用者可能重新匯入舊檔，或手動貼上列。
+ * 同一則公告混進考卷兩次，會稀釋 veto 比例並把 baseline 推高，
+ * 而且**題數看起來還變多了**，比題目不足更難察覺。
+ */
+const contentToItemKey = new Map<string, string>();
+for (const row of existing) {
+  contentToItemKey.set(contentKeyIgnoringDate(row), row.item_key);
+}
+const dupes: Labeled[] = [];
+const accepted: Labeled[] = [];
+for (const item of entered) {
+  const source = byKey.get(item.itemKey)!;
+  const contentKey = contentKeyIgnoringDate(source);
+  const already = contentToItemKey.get(contentKey);
+  // 同一個 item_key 是重標（允許，寫新 revision）；
+  // 不同 item_key 但內容相同，才是要擋的重複題。
+  if (already !== undefined && already !== item.itemKey) {
+    dupes.push(item);
+    continue;
+  }
+  contentToItemKey.set(contentKey, item.itemKey);
+  accepted.push(item);
+}
+
+if (dupes.length > 0) {
+  console.log(`\n⚠️ 略過 ${dupes.length} 列：內容與已標過的題目相同，只有發言日期不同`);
+  for (const d of dupes.slice(0, 10)) {
+    console.log(`    第 ${d.rowNumber} 列（${d.itemKey}）`);
+  }
+  console.log('   同一則公告只算一題，重複計入會稀釋考卷的鑑別度。\n');
+}
+if (accepted.length === 0) {
+  console.log('沒有可寫入的新題目。');
+  process.exit(0);
+}
+
+const vetoCount = accepted.filter((e) => e.label === 'veto').length;
+console.log(`標為 veto：${vetoCount} 題　標為 no_veto：${accepted.length - vetoCount} 題`);
 
 // 這兩個檢查只警告不阻擋——考卷是慢慢累積的，
 // 但要讓你現在就知道還差多少，而不是等到 llm:eval 才發現不能用。
-if (entered.length + maxRevision.size < MIN_GOLD_SAMPLE) {
+if (accepted.length + maxRevision.size < MIN_GOLD_SAMPLE) {
   console.log(
     `⚠️ 加上既有的 ${maxRevision.size} 題，總共仍不足 ${MIN_GOLD_SAMPLE} 題，` +
       '評測會被拒絕（CLAUDE.md：樣本 < 30 不下結論）。',
@@ -269,7 +380,7 @@ if (vetoCount === 0) {
   console.log('⚠️ 這批全部標成 no_veto。若整份考卷都是同一個答案，考幾分都沒有意義。');
 }
 
-const updates = entered.filter((e) => maxRevision.has(e.itemKey));
+const updates = accepted.filter((e) => maxRevision.has(e.itemKey));
 if (updates.length > 0) {
   console.log(`\n其中 ${updates.length} 題先前標註過，將寫成新的 revision（舊的保留可稽核）`);
 }
@@ -283,7 +394,7 @@ const labeledAt = new Date().toISOString();
 const labeledBy = process.env['USERNAME'] ?? process.env['USER'] ?? 'owner';
 await client.insert(
   'gold_set',
-  entered.map((item) => {
+  accepted.map((item) => {
     const source = byKey.get(item.itemKey)!;
     return {
       item_key: item.itemKey,
@@ -305,6 +416,6 @@ await client.insert(
   }),
 );
 
-console.log(`\n✓ 已寫入 ${entered.length} 題標註（標註者記為 ${labeledBy}）。`);
+console.log(`\n✓ 已寫入 ${accepted.length} 題標註（標註者記為 ${labeledBy}）。`);
 console.log('  下一步：npm run llm:eval');
 process.exit(0);

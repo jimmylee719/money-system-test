@@ -37,7 +37,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "llm:smoke": "tsx scripts/llm-smoke.ts"
+    "llm:smoke": "tsx scripts/llm-smoke.ts",
+    "llm:daily": "npm run llm:enqueue -- --write && npm run llm:gold -- --export"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
