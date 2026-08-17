@@ -69,6 +69,24 @@ export function latestPerDate(refsNewestFirst: readonly SnapshotRef[]): readonly
   return kept;
 }
 
+/**
+ * 帳本查詢一律排除「根本沒拿到資料」的快照。
+ *
+ * 【2026-08-16 事故：這一行是被真實事故逼出來的】
+ * 那天 TWSE 對全部 11 個來源回 HTTP 200 加一頁封鎖頁，抓取層照存，
+ * 於是 `latest()` 回傳的是 800 bytes 的 HTML，`JSON.parse` 直接爆掉。
+ * 抓取層已補上格式檢查，但**那 11 列永遠留在資料庫裡**——
+ * raw_snapshots 是 append-only，刪不掉也改不掉，這正是它的設計。
+ * 所以讀取端必須自己會躲。
+ *
+ * ⚠️ 只排除 `invalid_json` 與 `payload_not_an_array` 這兩種。
+ * `date_field_missing` / `date_unparsable` **不可**排除：
+ * twse_margin_balance、twse_attention、twse_suspended、twse_altered_trading
+ * 本來就沒有可解析的日期（L0 實測），那是正常資料，
+ * L2 用「同一次抓取」規則處理。把它們一起排掉會讓否決層整個瞎掉。
+ */
+const UNUSABLE_FILTER = 'data_as_of_reason=not.in.(invalid_json,payload_not_an_array)';
+
 export class SupabaseLedgerReader implements LedgerReader {
   readonly #url: string;
   readonly #apiKey: string;
@@ -84,7 +102,7 @@ export class SupabaseLedgerReader implements LedgerReader {
     const res = await this.#fetch(
       `${this.#url}/rest/v1/raw_snapshots?${query}` +
         '&select=source_id,data_as_of,data_period,body_path,content_hash,content_length,fetched_at' +
-        `&body_store=eq.supabase_storage&order=id.desc&limit=${limit}`,
+        `&body_store=eq.supabase_storage&${UNUSABLE_FILTER}&order=id.desc&limit=${limit}`,
       {
         headers: { apikey: this.#apiKey, Authorization: `Bearer ${this.#apiKey}` },
         signal: AbortSignal.timeout(60_000),

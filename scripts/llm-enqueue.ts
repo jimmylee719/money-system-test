@@ -105,7 +105,9 @@ if (staleSources > 0) {
 // ── 去重：已經在佇列裡的不重排 ─────────────────────────────────────────────
 async function existingTaskKeys(): Promise<ReadonlySet<string>> {
   const res = await fetch(
-    `${config.url}/rest/v1/llm_queue?data_as_of=eq.${signalDate}&select=task_key&limit=5000`,
+    // 排除 llm:verify 留下的探針列，否則會被算成「已在佇列中」而報錯數字
+    `${config.url}/rest/v1/llm_queue?data_as_of=eq.${signalDate}` +
+      '&task_key=not.like.__probe*&select=task_key&limit=5000',
     { headers: { apikey: config.serviceRoleKey, Authorization: `Bearer ${config.serviceRoleKey}` } },
   );
   if (res.status === 404) {

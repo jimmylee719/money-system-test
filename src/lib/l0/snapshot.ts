@@ -47,6 +47,38 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * 「這個回應根本不是我們登記的格式」的兩種理由。
+ *
+ * 【要分清楚兩件事，混在一起會出人命】
+ *   - `date_field_missing` / `date_unparsable`／`payload_empty`
+ *     ＝ 拿到的**是**登記的格式，只是這份資料沒有日期。
+ *       twse_margin_balance、twse_attention 等來源本來就是這樣（L0 實測），
+ *       L2 用「同一次抓取」規則處理它們。這些是正常資料，不可排除。
+ *   - `invalid_json` / `payload_not_an_array`
+ *     ＝ 拿到的**根本不是** JSON 陣列。端點回了 HTML、錯誤頁、封鎖頁之類的東西。
+ *       這不是「這份資料沒有日期」，是「我們沒有拿到資料」。
+ *
+ * 2026-08-16 實測：TWSE 對全部 11 個來源回了 HTTP **200** 加一頁
+ * 「因為安全性考量，您所執行的頁面無法呈現」。狀態碼是 200，所以抓取層照收，
+ * 存成快照後成為 latest，下游整條垮掉。判斷「有沒有拿到東西」不是解讀資料，
+ * 是確認我們拿到的是不是當初登記的那個格式——這不違反「L0 只存不判斷」。
+ */
+export const UNUSABLE_PAYLOAD_REASONS: readonly DataAsOfReason[] = [
+  'invalid_json',
+  'payload_not_an_array',
+];
+
+/** 這個 payload 是不是「根本沒拿到資料」 */
+export function isUnusablePayload(reason: DataAsOfReason): boolean {
+  return UNUSABLE_PAYLOAD_REASONS.includes(reason);
+}
+
+/** 回應看起來是不是 HTML（錯誤頁／封鎖頁通常長這樣） */
+export function looksLikeHtml(bytes: Uint8Array): boolean {
+  return Buffer.from(bytes.slice(0, 64)).toString('utf8').trimStart().startsWith('<');
+}
+
+/**
  * 檢視原始 bytes，抽出可觀察的中繼資料。
  * 解析失敗不拋錯——把失敗原因記錄下來，原始 bytes 照存。
  */
