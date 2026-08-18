@@ -42,7 +42,7 @@ import {
 import { DailyPicksWriter, buildPickRows } from '../src/lib/l1/picks';
 import type { DailyQuote } from '../src/lib/l1/types';
 import { buildUniverse, mergeUniverses } from '../src/lib/l1/universe';
-import { buildVetoContext, isSameRun } from '../src/lib/l2/context';
+import { buildVetoContext, isSameRun, staleAttentionCount } from '../src/lib/l2/context';
 import { applyVetoes } from '../src/lib/l2/engine';
 import { VetoEventWriter, buildVetoRows } from '../src/lib/l2/events';
 import {
@@ -345,7 +345,9 @@ console.log('\n--- L2 否決層資料來源 ---');
 const availability = {
   attention:
     l2SourceUsable(twseAtt, 'twse_attention（無公告時僅有佔位列，故不要求日期）', false) &&
-    l2SourceUsable(tpexAtt, 'tpex_attention', true),
+    // tpex_attention 是滾動視窗（實測含兩個交易日），不是單日檔，
+    // 因此不要求 data_as_of 等於訊號日；過期的列由 buildVetoContext 濾掉。
+    l2SourceUsable(tpexAtt, 'tpex_attention（滾動視窗）', false),
   disposition:
     l2SourceUsable(twseDisp, 'twse_disposition（滾動視窗）', false) &&
     l2SourceUsable(tpexDisp, 'tpex_disposition（滾動視窗）', false),
@@ -375,7 +377,7 @@ const alteredRows = [
 ];
 
 console.log(
-  `  公告筆數：注意 ${attentionRows.length}｜處置 ${dispositionRows.length}｜` +
+  `  公告筆數：注意 ${attentionRows.length}（其中 ${staleAttentionCount(attentionRows, dataAsOf)} 列非訊號日已排除）｜處置 ${dispositionRows.length}｜` +
     `暫停 ${suspensionRows.length}｜變更交易 ${alteredRows.length}`,
 );
 

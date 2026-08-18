@@ -49,7 +49,9 @@ export type { BuildVetoContextInput } from './context';
 export {
   SAME_RUN_TOLERANCE_MS,
   VetoSourceStaleError,
+  attentionForSignalDate,
   buildVetoContext,
   fetchGapMs,
   isSameRun,
+  staleAttentionCount,
 } from './context';

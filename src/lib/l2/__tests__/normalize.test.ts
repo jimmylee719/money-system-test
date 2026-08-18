@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { attentionForSignalDate, buildVetoContext, staleAttentionCount } from '../context';
+import type { AttentionRow } from '../types';
 import {
   normalizeTpexAlteredTrading,
   normalizeTpexAttention,
@@ -208,5 +210,57 @@ describe('變更交易方法', () => {
     expect(out.rows[1]!.periodicTrading).toBe(true);
     expect(out.rows[1]!.managedStock).toBe(false);
     expect(out.rows[1]!.suspensionOfTrading).toBe(true);
+  });
+});
+
+/**
+ * 2026-08-18 實測抓到的錯誤：tpex_attention 是滾動視窗，不是單日檔。
+ * 同一份 payload 同時含 1150814（11 檔）與 1150817（17 檔）。
+ */
+describe('attentionForSignalDate — 注意股只取訊號日當天', () => {
+  const rows: AttentionRow[] = [
+    { code: '1101', market: 'TWSE', date: '2026-08-14', info: '前一日上榜' },
+    { code: '2330', market: 'TPEx', date: '2026-08-17', info: '當日上榜' },
+    { code: '6121', market: 'TWSE', date: null, info: '無日期（TWSE 佔位或無樣本）' },
+  ];
+
+  it('過期的列被排除，當日的保留', () => {
+    const kept = attentionForSignalDate(rows, '2026-08-17');
+    expect(kept.map((r) => r.code)).toEqual(['2330', '6121']);
+  });
+
+  it('date 為 null 的列保留——不因未驗證的假設讓 TWSE 注意股整個失效', () => {
+    expect(attentionForSignalDate(rows, '2026-08-17').some((r) => r.code === '6121')).toBe(true);
+  });
+
+  it('被排除的列數會被回報，不無聲丟資料', () => {
+    expect(staleAttentionCount(rows, '2026-08-17')).toBe(1);
+    expect(staleAttentionCount(rows, '2026-08-14')).toBe(1);
+  });
+
+  it('buildVetoContext 只會索引到當日的注意股', () => {
+    const ctx = buildVetoContext({
+      signalDate: '2026-08-17',
+      attention: rows,
+      disposition: [],
+      suspension: [],
+      alteredTrading: [],
+    });
+    // 8/14 上榜、8/17 已下榜的不該被擋
+    expect(ctx.attention.has('1101')).toBe(false);
+    expect(ctx.attention.has('2330')).toBe(true);
+  });
+
+  it('修正前的行為（不過濾）會誤擋已下榜的股票——這是本次修正的重點', () => {
+    const ctxWrong = new Map(rows.map((r) => [r.code, r]));
+    expect(ctxWrong.has('1101')).toBe(true); // 舊做法：8/14 的列照樣進索引
+    const ctx = buildVetoContext({
+      signalDate: '2026-08-17',
+      attention: rows,
+      disposition: [],
+      suspension: [],
+      alteredTrading: [],
+    });
+    expect(ctx.attention.has('1101')).toBe(false); // 新做法：擋不到它
   });
 });
