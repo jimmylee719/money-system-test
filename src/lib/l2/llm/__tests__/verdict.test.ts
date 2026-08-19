@@ -127,7 +127,9 @@ describe('toVerdict — 只能否決的最後一道程式閘門', () => {
     expect(v.parseOk).toBe(true);
     expect(v.evidenceVerified).toBe(false);
     expect(v.quotedEvidence).toContain('拒絕往來');
-    expect(v.reason).toContain('引用在原文中找不到');
+    expect(v.reason).toContain('引用與原文不完全一致');
+    // 不得宣稱那是幻覺——本檢查分不出捏造與簡繁／近義字轉寫
+    expect(v.reason).toContain('本檢查無法區分');
   });
 
   it('判否決且引用屬實 → 否決成立', () => {
@@ -160,5 +162,55 @@ describe('toVerdict — 只能否決的最後一道程式閘門', () => {
     for (const raw of responses) {
       expect(['veto', 'no_veto']).toContain(toVerdict('k', ITEM, raw, 1).verdict);
     }
+  });
+});
+
+/**
+ * 2026-08-19 實測回歸：qwen2.5:3b 的 3 次「引用不符」全部不是幻覺，
+ * 而是簡體字或近義字轉寫。這組測試把那三種真實情況釘住，
+ * 確保日後有人放寬比對規則時，會先看到這裡寫的取捨。
+ */
+describe('引用不符的三種真實成因（2026-08-19 實測）', () => {
+  const item: Announcement = {
+    sourceId: 's',
+    code: '2425',
+    market: 'TWSE',
+    speakDate: '2026-08-18',
+    clause: '第20款',
+    subject: '公告本公司召開重大訊息說明記者會內容',
+    detail:
+      '鑒於美國商務部於113年4月將本公司透過子公司景弘，間接持有之子公司思騰合力(天津)' +
+      '科技有限公司列入實體清單中，對於集團後續營運及管理帶來極大不確定性。' +
+      '因思騰合力天津公司未在公開市場交易且被美國商務部列入實體清單中，不易洽詢潛在買家。' +
+      '為提升經濟效益，爰擬拆除現有廠房及相關設備。',
+    contentHash: 'x'.repeat(64),
+    itemKey: 'k',
+  };
+
+  it('簡體字轉寫驗不過（模型實際輸出）', () => {
+    expect(verifyQuote('美國商务部列入实体清单中，不易洽询潜在买家', item)).toBe(false);
+  });
+
+  it('「鑒」寫成「鑑」驗不過——這不是簡繁，是換了一個字', () => {
+    expect(verifyQuote('鑑於美國商務部於113年4月將本公司', item)).toBe(false);
+    expect(verifyQuote('鑒於美國商務部於113年4月將本公司', item)).toBe(true);
+  });
+
+  it('「爰擬」寫成「為擬」驗不過', () => {
+    expect(verifyQuote('為提升經濟效益，為擬拆除現有廠房', item)).toBe(false);
+    expect(verifyQuote('為提升經濟效益，爰擬拆除現有廠房', item)).toBe(true);
+  });
+
+  it('真正的幻覺一樣驗不過——放寬規則的風險就在這裡分不出來', () => {
+    expect(verifyQuote('本公司遭銀行拒絕往來並列為全額交割股', item)).toBe(false);
+  });
+
+  it('作廢時的說明不得斷言是幻覺', () => {
+    const raw = JSON.stringify({ verdict: 'veto', quote: '美國商务部列入实体清单中', reason: 'r' });
+    const v = toVerdict('k', item, raw, 1);
+    expect(v.verdict).toBe('no_veto');
+    expect(v.evidenceVerified).toBe(false);
+    expect(v.reason).not.toContain('找不到');
+    expect(v.reason).toContain('本檢查無法區分');
   });
 });

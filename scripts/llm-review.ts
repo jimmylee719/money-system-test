@@ -153,7 +153,8 @@ function show(title: string, list: readonly { item: GoldItem; r: ResultRow }[]):
     if (!r.parse_ok) {
       console.log('  ⚠️ 回應無法解析，依規則自動判為 no_veto');
     } else if (!r.evidence_verified) {
-      console.log('  ⚠️ 模型判否決但引用在原文中找不到（幻覺），已作廢改判 no_veto');
+      console.log('  ⚠️ 模型判否決但引用與原文不完全一致，已作廢改判 no_veto');
+      console.log('     （可能是捏造，也可能是簡體字或近義字轉寫——本檢查分不出來）');
     }
     if (r.quoted_evidence.trim() !== '') {
       console.log(`  模型引用　${r.quoted_evidence.replace(/\s+/g, ' ').slice(0, 62)}`);
@@ -199,7 +200,9 @@ console.log(
 const parseFail = [...results.values()].filter((r) => !r.parse_ok).length;
 const evidenceFail = [...results.values()].filter((r) => r.parse_ok && !r.evidence_verified).length;
 if (parseFail > 0 || evidenceFail > 0) {
-  console.log(`回應品質：解析失敗 ${parseFail} 題　引用為幻覺而作廢 ${evidenceFail} 題`);
+  console.log(`回應品質：解析失敗 ${parseFail} 題　引用與原文不符而作廢 ${evidenceFail} 題`);
+  console.log('　　⚠️ 作廢的引用請逐題看過：捏造與「簡體字／近義字轉寫」在紀錄上長得一樣，');
+  console.log('　　　 但意義完全不同——後者代表模型其實判對了。');
 }
 console.log('\n這些判定永久留在 llm_results，日後覆核標註標準時看的就是這份紀錄。');
 process.exit(0);
