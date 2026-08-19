@@ -324,12 +324,28 @@ export default async function Page() {
                 hint={`其中應否決 ${data.llm.goldVetoLabels}　需 ≥30 才能評測`}
               />
             </div>
-            {data.llm.queueTotal > data.llm.judgedTotal && (
+            {/*
+              【沒有 champion 時，佇列積壓完全不是重點】
+              舊版不分情況都說「未判的公告等於今天少擋了」，那句話預設「已判的正在生效」。
+              但沒有 champion 時**整層都不生效**——已判的 35 則是評測跑出來的考卷答案，
+              不是上線後的篩選結果，一則否決都沒有套用到任何清單上。
+              把缺口說成 160 會讓人以為只差那些；實際上是 195 則全部沒被看過。
+            */}
+            {data.llm.championModel === null ? (
               <p className="mt-3 text-sm text-amber-200">
-                ⚠️ 有 {data.llm.queueTotal - data.llm.judgedTotal} 則公告尚未判定。
-                這一層不 fail-closed（不會因為沒判完就全部擋掉），
-                所以未判的公告等於今天少擋了——這個數字就是那個缺口。
+                ⚠️ 此層整層未生效。沒有模型通過 gold_set，
+                因此佇列裡 {data.llm.queueTotal} 則公告**全部**沒有被套用任何否決——
+                不只是未判的那些。上方「已判 {data.llm.judgedTotal}」是評測時跑的考卷答案，
+                不是上線後的篩選紀錄。
               </p>
+            ) : (
+              data.llm.queueTotal > data.llm.judgedTotal && (
+                <p className="mt-3 text-sm text-amber-200">
+                  ⚠️ 有 {data.llm.queueTotal - data.llm.judgedTotal} 則公告尚未判定。
+                  這一層不 fail-closed（不會因為沒判完就全部擋掉），
+                  所以未判的公告等於今天少擋了——這個數字就是那個缺口。
+                </p>
+              )
             )}
           </>
         )}
