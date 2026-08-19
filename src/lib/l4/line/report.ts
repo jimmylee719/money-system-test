@@ -89,12 +89,34 @@ function watchlistBlock(input: DailyReportInput): readonly string[] {
     lines.push('（今日無可排序的標的）');
     return lines;
   }
+  // 【觀察榜不受 L2 影響，但必須標示哪幾檔已被 L2 擋下】
+  // 排名純由 L1 產生，那正是它作為對照組的意義——不能因為 L2 擋了就把它拿掉，
+  // 否則就沒有東西可以拿來衡量 L2 到底擋對了沒有。
+  //
+  // 但「這一檔是注意股／處置股」是讀者判斷時該知道的事實。
+  // 2026-08-19 使用者實際反映：Dashboard 上第 2 名標著「擋下」，LINE 版本沒有，
+  // 只看手機的人不會知道那是處置股。標示只是補上事實，不會讓觀察榜變成買進建議。
+  const blockedBy = new Map<string, string[]>();
+  for (const v of input.veto.vetoed) {
+    const label = RULE_SHORT[v.ruleId] ?? v.ruleId;
+    const existing = blockedBy.get(v.code);
+    if (existing === undefined) {
+      blockedBy.set(v.code, [label]);
+    } else if (!existing.includes(label)) {
+      existing.push(label);
+    }
+  }
+
   for (const [i, s] of input.watchlist.entries()) {
     const market = MARKET_LABEL[s.market] ?? s.market;
     lines.push(
       `${i + 1}. ${s.code} ${s.name}（${market}）${s.close}`,
       `　　分數 ${s.compositeScore.toFixed(3)}　因子 ${s.realFactorCount}/${input.ranking.activeFactors.length}`,
     );
+    const blocked = blockedBy.get(s.code);
+    if (blocked !== undefined) {
+      lines.push(`　　⛔ 已被 L2 擋下：${blocked.join('、')}`);
+    }
   }
   return lines;
 }
@@ -106,11 +128,24 @@ function systemBlock(input: DailyReportInput): readonly string[] {
     .map(([rule, n]) => `${RULE_SHORT[rule] ?? rule}${n}`)
     .join(' ');
 
+  // 踩到不只一條規則的檔數。**不是**「規則觸發次數 − 相異檔數」——
+  // 一檔踩三條時那個減法會算出 2，但實際只有 1 檔踩多條。
+  const hitsPerCode = new Map<string, number>();
+  for (const v of veto.vetoed) {
+    hitsPerCode.set(v.code, (hitsPerCode.get(v.code) ?? 0) + 1);
+  }
+  const multiRuleCount = [...hitsPerCode.values()].filter((n) => n > 1).length;
+
   const lines = [
     '',
     '━━━ 系統狀態 ━━━',
     `排序池 ${ranking.rankedCount.toLocaleString()} 檔`,
-    `L2 擋下 ${vetoedCodes.size} 檔${counts === '' ? '' : `（${counts}）`}`,
+    // 【為什麼括號裡的數字加起來會大於前面那個】
+    // 前者是「幾檔被擋」，後者是「幾次規則觸發」。同一檔可能既是注意股又變更交易。
+    // 兩個數字都對，但擺在一起看起來像算錯，所以差額要明講。
+    // （2026-08-19：51 檔 vs 處置13＋注意17＋變更23＝53，就是這個情況。）
+    `L2 擋下 ${vetoedCodes.size} 檔${counts === '' ? '' : `（${counts}）`}` +
+      (multiRuleCount > 0 ? `　其中 ${multiRuleCount} 檔踩到多條` : ''),
     `L3 核准 ${risk.approved.length} 檔`,
   ];
   if (ranking.inactiveFactors.length > 0) {

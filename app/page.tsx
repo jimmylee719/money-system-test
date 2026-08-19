@@ -23,10 +23,36 @@ const RULE: Record<string, string> = {
   source_unavailable: '資料缺漏',
 };
 
-function Section({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
+/**
+ * `date` 只給「內容會隨交易日改變」的區塊用。
+ *
+ * 【為什麼每個區塊都要自己帶日期】
+ * 2026-08-19 使用者實際反映：觀察榜看不到日期。
+ * 頁首其實有「資料日 2026-08-18」，但手機往下捲到觀察榜時它早就滑出畫面了。
+ * 觀察榜是研究紀錄，**日期就是紀錄本身**——CLAUDE.md 把 data_as_of 列為必含欄位，
+ * 正是因為看不到日期的清單無法判斷有沒有前視偏誤。放在頁首等於沒放。
+ */
+function Section({
+  title,
+  note,
+  date,
+  children,
+}: {
+  title: string;
+  note?: string;
+  date?: string | null;
+  children: React.ReactNode;
+}) {
   return (
     <section className="mb-10">
-      <h2 className="mb-1 text-lg font-semibold text-neutral-100">{title}</h2>
+      <h2 className="mb-1 flex flex-wrap items-baseline gap-2 text-lg font-semibold text-neutral-100">
+        {title}
+        {date !== undefined && (
+          <span className="rounded border border-neutral-700 px-1.5 py-0.5 font-mono text-xs font-normal text-neutral-400">
+            資料日 {date ?? '尚無資料'}
+          </span>
+        )}
+      </h2>
       {note !== undefined && <p className="mb-3 text-sm text-neutral-400">{note}</p>}
       {children}
     </section>
@@ -102,6 +128,7 @@ export default async function Page() {
       {/* ── 交易訊號：唯一可執行的東西，放最前面 ── */}
       <Section
         title="交易訊號"
+        date={data.latestDate}
         note="通過 L1 排序、L2 否決、L3 風控三關者。經常是 0 檔，那是正常且健康的。"
       >
         {signals.length === 0 ? (
@@ -162,6 +189,7 @@ export default async function Page() {
       {/* ── 觀察榜 ── */}
       <Section
         title="觀察榜 Top 5"
+        date={data.latestDate}
         note="⚠️ 研究紀錄，不是買進建議。依 L1 排名產生，不受 L2／L3 影響——那正是衡量兩層的對照組。"
       >
         {watchlist.length === 0 ? (
@@ -241,7 +269,11 @@ export default async function Page() {
       </Section>
 
       {/* ── L2 否決 ── */}
-      <Section title="L2 否決" note="只能減少行動，不能產生訊號。被擋下的名次分布可看出 L2 的成本。">
+      <Section
+        title="L2 否決"
+        date={data.latestDate}
+        note="只能減少行動，不能產生訊號。被擋下的名次分布可看出 L2 的成本。"
+      >
         {data.vetoes.rows.length === 0 ? (
           <p className="text-sm text-neutral-400">當日無否決紀錄。</p>
         ) : (
