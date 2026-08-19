@@ -11,6 +11,8 @@
 
 import 'server-only';
 
+import { latestRevisions } from '../l2/llm/gold';
+
 /** 探針列的過濾條件（各表的探針標記方式不同） */
 const PROBE_FILTERS = {
   dailyPicks: 'revision=lt.1000',
@@ -103,8 +105,8 @@ export interface LlmStatus {
   readonly championModel: string | null;
   readonly queueTotal: number;
   readonly judgedTotal: number;
-  readonly vetoTotal: number;
   readonly goldTotal: number;
+  /** 標準答案為 veto 的題數，**只算每題最新 revision** */
   readonly goldVetoLabels: number;
 }
 
@@ -187,10 +189,18 @@ export async function loadDashboard(): Promise<DashboardData> {
     query<{ task_key: string; verdict: string }>(
       `llm_results?${PROBE_FILTERS.llm}&select=task_key,verdict`,
     ),
-    query<{ item_key: string; label: string }>(
-      'gold_set?item_key=not.like.__probe*&select=item_key,label',
+    query<{ item_key: string; label: string; revision: number }>(
+      'gold_set?item_key=not.like.__probe*&select=item_key,label,revision',
     ),
   ]);
+
+  // 【收斂到每題最新 revision 才計數】
+  // 舊版只對 item_key 去重算題數，標籤卻照全表數，被 revision 2 取代的舊答案
+  // 也被算進去 —— 畫面顯示「35 題其中應否決 9」，但評測的 baseline 80.0%
+  // 對應的是 7。共用 latestRevisions 才不會兩邊各算各的。
+  const goldLatest = latestRevisions(
+    goldRows.rows.map((r) => ({ itemKey: r.item_key, label: r.label, revision: r.revision })),
+  );
 
   return {
     latestDate,
@@ -208,9 +218,8 @@ export async function loadDashboard(): Promise<DashboardData> {
       queueTotal: llmQueue.rows.length,
       // 同一則公告若被多個模型判過，只算一則已判
       judgedTotal: new Set(llmResults.rows.map((r) => r.task_key)).size,
-      vetoTotal: llmResults.rows.filter((r) => r.verdict === 'veto').length,
-      goldTotal: new Set(goldRows.rows.map((r) => r.item_key)).size,
-      goldVetoLabels: goldRows.rows.filter((r) => r.label === 'veto').length,
+      goldTotal: goldLatest.length,
+      goldVetoLabels: goldLatest.filter((r) => r.label === 'veto').length,
     },
   };
 }

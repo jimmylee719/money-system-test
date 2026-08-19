@@ -234,3 +234,59 @@ describe('evaluatePromotion — 禁止熱抽換', () => {
     expect(MIN_GOLD_SAMPLE).toBe(30);
   });
 });
+
+/**
+ * 2026-08-19 實測事故：Dashboard 顯示「gold_set 35 題　其中應否決 9」，
+ * 但同一份考卷評測算出的 baseline 是 80.0%，對應的應否決是 7。
+ *
+ * 成因：Dashboard 不想湊出完整的 GoldItem，就自己寫了一份去重——
+ * 題數用 item_key 去重（35，對），標籤卻直接數全表（47 列裡有 9 個 veto，錯），
+ * 把已被 revision 2 取代的舊答案也算進去了。
+ *
+ * 修法是把 latestRevisions 泛型化，讓只有三個欄位的形狀也能共用同一支收斂規則。
+ * 這組測試釘住「泛型化之後行為不變」與「標籤要在收斂之後才數」。
+ */
+describe('latestRevisions 泛型化——最小形狀也要能用', () => {
+  interface MinimalRow {
+    readonly itemKey: string;
+    readonly label: string;
+    readonly revision: number;
+  }
+
+  // 取自 2026-08-19 的真實情形：某題 rev1 標 veto，rev2 改成 no_veto
+  const rows: readonly MinimalRow[] = [
+    { itemKey: 'a', label: 'veto', revision: 1 },
+    { itemKey: 'a', label: 'no_veto', revision: 2 },
+    { itemKey: 'b', label: 'veto', revision: 1 },
+    { itemKey: 'b', label: 'no_veto', revision: 2 },
+    { itemKey: 'c', label: 'veto', revision: 1 },
+    { itemKey: 'd', label: 'no_veto', revision: 1 },
+  ];
+
+  it('沒有 GoldItem 的其餘欄位也能收斂', () => {
+    expect(latestRevisions(rows)).toHaveLength(4);
+  });
+
+  it('回傳型別保留呼叫端的形狀，不會被擴寬成 GoldItem', () => {
+    const kept = latestRevisions(rows);
+    // 若泛型失效，這一行在型別檢查階段就會失敗
+    expect(kept.map((r) => r.label).sort()).toEqual(['no_veto', 'no_veto', 'no_veto', 'veto']);
+  });
+
+  it('標籤必須在收斂之後才數 —— 先數會多算被取代的舊答案', () => {
+    const beforeReducing = rows.filter((r) => r.label === 'veto').length;
+    const afterReducing = latestRevisions(rows).filter((r) => r.label === 'veto').length;
+    expect(beforeReducing).toBe(3); // 錯的算法
+    expect(afterReducing).toBe(1); // 對的算法
+    expect(afterReducing).not.toBe(beforeReducing);
+  });
+
+  it('題數與應否決數必須來自同一份收斂結果，否則 baseline 會對不上', () => {
+    const latest = latestRevisions(rows);
+    const vetoCount = latest.filter((r) => r.label === 'veto').length;
+    const baseline = (latest.length - vetoCount) / latest.length;
+    expect(latest.length).toBe(4);
+    expect(vetoCount).toBe(1);
+    expect(baseline).toBeCloseTo(0.75, 10);
+  });
+});

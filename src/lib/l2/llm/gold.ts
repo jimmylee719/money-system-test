@@ -127,9 +127,20 @@ export function goldSetHash(items: readonly GoldItem[]): string {
   return createHash('sha256').update(canonical, 'utf8').digest('hex');
 }
 
-/** 把同一 item_key 的多個 revision 收斂成最新的那一版 */
-export function latestRevisions(items: readonly GoldItem[]): readonly GoldItem[] {
-  const best = new Map<string, GoldItem>();
+/**
+ * 把同一 item_key 的多個 revision 收斂成最新的那一版。
+ *
+ * 【為什麼是泛型而不是只吃 GoldItem】
+ * 2026-08-19 的實例：Dashboard 只需要 item_key／label／revision 三個欄位，
+ * 因為不想湊出完整的 GoldItem 就自己寫了一份「去重」，結果只去重了題數，
+ * 標籤數仍然把被取代的舊版算進去——畫面顯示「35 題其中應否決 9」，
+ * 但評測算出的 baseline 80.0% 對應的是 7。同一份考卷兩個數字，一個對一個錯。
+ * 收斂規則只准有一份實作，任何帶 itemKey/revision 的形狀都能用這一支。
+ */
+export function latestRevisions<T extends { readonly itemKey: string; readonly revision: number }>(
+  items: readonly T[],
+): readonly T[] {
+  const best = new Map<string, T>();
   for (const item of items) {
     const current = best.get(item.itemKey);
     if (current === undefined || item.revision > current.revision) {
