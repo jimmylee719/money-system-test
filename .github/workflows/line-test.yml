@@ -1,0 +1,63 @@
+# LINE 推播測試 —— 手動按鈕，隨時可驗證通知管線是否活著
+#
+# 【為什麼需要這支】
+# 2026-08-19 事故：每日 LINE 日報自 8/14 起連續 5 天沒送出，
+# 但排程全綠、資料照抓，沒有任何跡象。原因是 GitHub repo secrets 從未設定。
+# 那五天之所以沒被發現，正是因為**沒有任何辦法主動驗證通知管線**——
+# 只能被動等日報，而「日報沒來」跟「今天沒事」在使用者眼中長得一模一樣。
+#
+# 【為什麼不能直接重跑 l0-ingest 來驗】
+# 當日的 daily_picks 寫過之後會被唯一索引擋下，程式在推播之前就結束（刻意的）。
+# 所以正常管線一天只有一次驗證機會，錯過就要等隔天。
+#
+# 【本工作流不寫入任何資料】
+# 沒有 --write。只讀資料庫、算出日報、推播一次。
+# append-only 的表一列都不會動，可以放心重複按。
+#
+# 前置：repo → Settings → Secrets and variables → Actions 需有
+#   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY  （讀資料）
+#   LINE_CHANNEL_ACCESS_TOKEN / LINE_CHANNEL_SECRET / LINE_USER_ID （推播）
+# ⚠️ 這組與 Supabase Edge Function 的 secrets 是**兩個不同的地方**，要各設一次。
+
+name: LINE 推播測試
+
+on:
+  workflow_dispatch:
+
+jobs:
+  push-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: 試推一則日報（dry-run，不寫入任何資料）
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_CHANNEL_SECRET: ${{ secrets.LINE_CHANNEL_SECRET }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+        run: |
+          set -euo pipefail
+          npm run l1:picks -- --notify 2>&1 | tee run.log
+
+          # 本工作流唯一的用途就是推播，所以推不出去＝失敗，要紅燈。
+          # （每日排程相反：通知失敗不該讓資料管線被判定為失敗。）
+          if grep -q '^::error::' run.log; then
+            echo "::error::LINE 推播失敗，原因見上方紅字。"
+            exit 1
+          fi
+          if ! grep -q '已推播 LINE 日報' run.log; then
+            echo "::error::找不到推播成功的紀錄，通知管線沒有走到底。"
+            exit 1
+          fi
+          echo "LINE 日報已送出，請確認手機收到。"
