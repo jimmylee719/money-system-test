@@ -728,22 +728,62 @@ console.log('\n--- LINE 日報內容 ---');
 console.log(reportText);
 console.log(`--- 共 ${reportText.length} 字 ---`);
 
-if (NOTIFY) {
+/**
+ * 推播 LINE 日報。
+ *
+ * 【2026-08-19 修正：推播一律排在寫入之後，且不得讓程式中斷】
+ * 原本推播寫在寫入資料庫之前，有兩個後果，都是這天才發現的：
+ *   1. LINE 掛掉或 token 過期 → 例外往上拋 → **那天的觀察榜根本沒寫進資料庫**。
+ *      研究紀錄是資產，通知只是便利；讓便利品擋住資產，順序是顛倒的。
+ *   2. 排程有 09:40 與 11:40 兩班。第一班寫入成功後，第二班會被唯一索引擋下，
+ *      但推播在那之前就發出去了 → 每天收到兩則一模一樣的日報。
+ * 改成寫入完成後才推播，兩個問題一起消失。
+ *
+ * 【設定漏掉時必須吵】
+ * 原本缺設定只印一行就過去，步驟仍是綠燈——所以 2026-08-14 之後日報停了好幾天
+ * 都沒人發現（GitHub Actions 的 repo secrets 從未設定過，只設了 Edge Function 的）。
+ * 明確要求 --notify 卻推不出去，那是故障，不是「略過」。在 CI 內額外輸出
+ * ::error:: 註記讓它在執行頁面上紅字顯示，但**不改變結束碼**——
+ * 通知失敗不該讓資料管線被判定為失敗。
+ */
+async function sendLineReport(): Promise<void> {
+  const inCi = process.env['GITHUB_ACTIONS'] === 'true';
+  const alarm = (message: string): void => {
+    console.log(`\n✗ ${message}`);
+    if (inCi) {
+      console.log(`::error::${message}`);
+    }
+  };
+
   if (!hasLineConfig()) {
-    console.log('\n✗ 未設定 LINE 環境變數，略過推播。');
-    console.log('  需要 LINE_CHANNEL_ACCESS_TOKEN／LINE_CHANNEL_SECRET／LINE_USER_ID');
-  } else {
+    alarm(
+      '要求推播 LINE 日報，但憑證未設定，日報沒有送出。' +
+        '需要 LINE_CHANNEL_ACCESS_TOKEN／LINE_CHANNEL_SECRET／LINE_USER_ID。' +
+        '（在 GitHub 是 repo Settings → Secrets and variables → Actions，' +
+        '與 Supabase Edge Function 的 secrets 是兩個不同的地方，要各設一次。）',
+    );
+    return;
+  }
+
+  try {
     const line = loadLineConfig();
     await new LineClient({ channelAccessToken: line.channelAccessToken }).pushText(
       line.userId,
       reportText,
     );
     console.log('\n✓ 已推播 LINE 日報');
+  } catch (error) {
+    // 推播失敗不影響已寫入的資料，但要看得見
+    alarm(`LINE 日報推播失敗：${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
 // ── 寫入 ─────────────────────────────────────────────────────────────────────
 if (!WRITE) {
+  // dry-run 也允許推播，那是測試通知管線的唯一途徑
+  if (NOTIFY) {
+    await sendLineReport();
+  }
   console.log('\n（dry-run，未寫入資料庫。確認無誤後加 --write）');
   process.exit(0);
 }
@@ -833,4 +873,10 @@ if (riskResult.approved.length > 0) {
 }
 
 console.log('  以上皆為 append-only，此後不可修改或刪除。');
+
+// 全部寫完才推播。此後即使 LINE 失敗，資料庫裡的紀錄已經安全落地。
+if (NOTIFY) {
+  await sendLineReport();
+}
+
 process.exit(0);

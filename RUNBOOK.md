@@ -31,8 +31,32 @@ Supabase Dashboard → SQL Editor → 貼上全文 → Run。已經跑過的可�
 
 | 檔案 | 內容 |
 |---|---|
-| `supabase/migrations/0001` ～ `0011` | 已完成 |
-| `supabase/migrations/0012_llm.sql` | **P11 新增，尚未執行** |
+| `supabase/migrations/0001` ～ `0012` | 已完成 |
+
+### (2b) 憑證要設在**三個**不同的地方，各設一次
+
+2026-08-19 的事故就是漏了第三個：每日 LINE 日報從 8/14 之後就沒送出過，
+但排程全綠、資料照抓，沒有任何跡象。
+
+| 設在哪 | 怎麼設 | 給誰用 | 漏了會怎樣 |
+|---|---|---|---|
+| `.env.local`（本機） | 自己編輯檔案 | 你手動跑的指令 | 本機指令跑不動，會立刻報錯 |
+| Supabase Edge Function | `npm run l4:sync-secrets` | LINE webhook：**接收**你的 `/rec` 指令 | 傳訊息給 bot 沒反應 |
+| **GitHub repo secrets** | repo → Settings → Secrets and variables → **Actions** → New repository secret | 排程：**送出**每日日報 | **日報靜悄悄不送，其他一切正常** |
+
+GitHub 那邊要六個（前兩個若已能正常抓資料就代表設好了）：
+
+```
+SUPABASE_URL
+SUPABASE_SERVICE_ROLE_KEY
+LINE_CHANNEL_ACCESS_TOKEN
+LINE_CHANNEL_SECRET
+LINE_USER_ID
+```
+
+⚠️ **這五個值一律直接貼進 GitHub 網頁的欄位，不要經過任何命令列。**
+LINE access token 是 base64，含 `/` `+` 與結尾 `=`，用指令傳很容易被 shell 吃掉——
+2026-08-16 就發生過三個 secret 被設成同一個值、症狀只有一個 401 的情況。
 
 ### (3) 驗證每一層的鎖有沒有真的鎖上
 
