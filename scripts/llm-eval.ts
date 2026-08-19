@@ -1,8 +1,22 @@
 /**
  * Champion / Challenger 評測與晉升：
- *   `npm run llm:eval`              考一次並印出成績與晉升判定（不寫入）
+ *   `npm run llm:eval`              考一次，印出成績與晉升判定
  *   `npm run llm:eval -- --write`   通過五道門檻才登記為新的 champion
  *   `npm run llm:eval -- --register` 只把挑戰者登記成 challenger（不評測、不晉升）
+ *
+ * 【逐題結果一律保存，晉升才需要 --write】
+ * 這兩件事性質不同，所以規則也不同：
+ *   保存逐題判定 = **記錄實驗發生過什麼**。append-only 的稽核資料，
+ *     對正式運作沒有任何影響（worker 只認 role=champion）。
+ *     一次評測要跑十幾分鐘，關掉視窗就沒了是不可接受的。
+ *   晉升 champion = **改變正式運作**。這才需要 --write。
+ * 專案的「預設 dry-run」規矩是為了擋住不可逆的正式變更，不是為了擋住記錄。
+ *
+ * 【已判過的題目會重用，不重複呼叫模型】
+ * 模型版本由 (model_key, prompt_hash, params_hash) 唯一決定，temperature 為 0，
+ * 同一版本對同一題再問一次應得相同答案。因此已存在 llm_results 的題目直接重用：
+ * 重跑評測從十幾分鐘變成幾秒，而且成績可重現——
+ * 每次重跑都得到不同分數的評測，本身就沒有評測的意義。
  *
  * 【禁止熱抽換】（CLAUDE.md）
  * 這支程式是唯一能產生 champion 的地方，而它只在五道門檻全過時才寫入：
@@ -82,6 +96,56 @@ if (REGISTER_ONLY) {
   process.exit(0);
 }
 
+// ── 確保這個模型版本已登記，並取得 model_registry_id ────────────────────────
+//
+// 逐題結果要能被稽核，就必須知道「是哪一版模型答的」。
+// 模型版本由 (model_key, prompt_hash, params_hash) 唯一決定——
+// 換模型是新版本，只改一句提示詞也是新版本，兩者都必須重新考。
+interface RegistryRow {
+  readonly id: number;
+  readonly registered_at: string;
+}
+
+async function ensureChallengerRegistered(): Promise<number> {
+  const existing = await select<RegistryRow>(
+    `model_registry?model_key=eq.${encodeURIComponent(spec.modelKey)}` +
+      `&prompt_hash=eq.${spec.promptHash}&params_hash=eq.${spec.paramsHash}` +
+      "&role=eq.challenger&select=id,registered_at&order=registered_at.asc&limit=1",
+  );
+  const found = existing[0];
+  if (found !== undefined) {
+    console.log(`模型版本　registry id=${found.id}（登記於 ${found.registered_at.slice(0, 19)}）`);
+    return found.id;
+  }
+  await client.insert("model_registry", [
+    {
+      model_key: spec.modelKey,
+      provider: spec.provider,
+      endpoint: spec.endpoint,
+      role: "challenger",
+      prompt_version: spec.promptVersion,
+      prompt_hash: spec.promptHash,
+      params_hash: spec.paramsHash,
+      params_json: spec.params,
+      note: "由 llm:eval 自動登記（challenger 無成績，worker 不會採用）",
+      registered_at: new Date().toISOString(),
+    },
+  ]);
+  const created = await select<RegistryRow>(
+    `model_registry?model_key=eq.${encodeURIComponent(spec.modelKey)}` +
+      `&prompt_hash=eq.${spec.promptHash}&params_hash=eq.${spec.paramsHash}` +
+      "&role=eq.challenger&select=id,registered_at&order=registered_at.desc&limit=1",
+  );
+  const id = created[0]?.id;
+  if (id === undefined) {
+    throw new Error("登記 challenger 後仍查不到 registry id");
+  }
+  console.log(`模型版本　registry id=${id}（本次新登記）`);
+  return id;
+}
+
+const MODEL_ID = await ensureChallengerRegistered();
+
 // ── 讀考卷 ──────────────────────────────────────────────────────────────────
 interface GoldRow {
   readonly item_key: string;
@@ -153,20 +217,91 @@ console.log(
 );
 
 // ── 考試 ────────────────────────────────────────────────────────────────────
+//
+// 已經判過的題目直接重用 llm_results 裡的紀錄，不重複呼叫模型。
+// 這不只是省時間：**同一版模型對同一題應該給同一個答案**，
+// 每次重跑都得到不同分數的評測，本身就沒有評測的意義。
+interface StoredResult {
+  readonly task_key: string;
+  readonly verdict: string;
+  readonly quoted_evidence: string;
+  readonly evidence_verified: boolean;
+  readonly parse_ok: boolean;
+  readonly reason: string;
+  readonly raw_response: string;
+  readonly latency_ms: number;
+}
+
+const stored = new Map<string, LlmVerdict>(
+  (
+    await select<StoredResult>(
+      `llm_results?model_registry_id=eq.${MODEL_ID}&select=task_key,verdict,quoted_evidence,` +
+        'evidence_verified,parse_ok,reason,raw_response,latency_ms&limit=5000',
+    )
+  ).map((r) => [
+    r.task_key,
+    {
+      taskKey: r.task_key,
+      verdict: r.verdict as LlmVerdict['verdict'],
+      quotedEvidence: r.quoted_evidence,
+      evidenceVerified: r.evidence_verified,
+      parseOk: r.parse_ok,
+      reason: r.reason,
+      rawResponse: r.raw_response,
+      latencyMs: r.latency_ms,
+    },
+  ]),
+);
+
 const provider = new OpenAiCompatibleProvider(spec);
 const verdicts = new Map<string, LlmVerdict>();
 let failed = 0;
+let reused = 0;
+let judged = 0;
 
-console.log('── 作答中（每題都會實際呼叫一次本機模型）────────────────────────');
+console.log(`── 作答中（已判過的重用，新題才呼叫模型）── 已有紀錄 ${stored.size} 題 ──`);
 for (const [index, item] of gold.entries()) {
+  const cached = stored.get(item.itemKey);
+  if (cached !== undefined) {
+    verdicts.set(item.itemKey, cached);
+    reused += 1;
+    const right = cached.verdict === item.label ? '✓' : '✗';
+    process.stdout.write(
+      `\r  ${index + 1}/${gold.length}  ${right} ${item.code} ${cached.verdict.padEnd(8)}` +
+        `（標準答案 ${item.label}）　重用          `,
+    );
+    continue;
+  }
   try {
     const completion = await provider.complete(SYSTEM_PROMPT, buildUserPrompt(item));
     const verdict = toVerdict(item.itemKey, item, completion.content, completion.latencyMs);
     verdicts.set(item.itemKey, verdict);
+    judged += 1;
+
+    // 逐題立刻寫入。跑十幾分鐘的實驗不該因為中途中斷就整批消失，
+    // 也不該因為關掉視窗，就再也查不到模型當時究竟引用了什麼。
+    await client.insert('llm_results', [
+      {
+        task_key: verdict.taskKey,
+        model_registry_id: MODEL_ID,
+        model_key: spec.modelKey,
+        prompt_version: spec.promptVersion,
+        role_at_run: 'challenger',
+        verdict: verdict.verdict,
+        quoted_evidence: verdict.quotedEvidence,
+        evidence_verified: verdict.evidenceVerified,
+        parse_ok: verdict.parseOk,
+        reason: verdict.reason,
+        raw_response: verdict.rawResponse,
+        latency_ms: verdict.latencyMs,
+        computed_at: new Date().toISOString(),
+      },
+    ]);
+
     const right = verdict.verdict === item.label ? '✓' : '✗';
     process.stdout.write(
       `\r  ${index + 1}/${gold.length}  ${right} ${item.code} ${verdict.verdict.padEnd(8)}` +
-        `（標準答案 ${item.label}）           `,
+        `（標準答案 ${item.label}）　新判          `,
     );
   } catch (error) {
     failed += 1;
@@ -174,6 +309,8 @@ for (const [index, item] of gold.entries()) {
   }
 }
 console.log('\n');
+console.log(`本次新判 ${judged} 題、重用既有紀錄 ${reused} 題、呼叫失敗 ${failed} 題`);
+console.log(`逐題判定已寫入 llm_results（model_registry_id=${MODEL_ID}），可事後稽核。\n`);
 
 const score = scoreAgainstGold(gold, verdicts);
 
