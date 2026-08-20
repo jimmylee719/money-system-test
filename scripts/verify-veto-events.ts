@@ -16,6 +16,7 @@
  */
 
 import { loadEnvFileIfPresent, loadSupabaseConfig } from '../src/lib/config/env';
+import { RULE_SPECS } from '../src/lib/l2/rules';
 
 loadEnvFileIfPresent();
 const config = loadSupabaseConfig();
@@ -179,6 +180,24 @@ await expectRejected(
   '23514',
   'veto_events_rule_id_check',
 );
+
+/**
+ * 【每一條程式裡的規則都必須真的寫得進去】
+ *
+ * 上一則證明「沒登記的規則會被擋」，但那擋不住相反的錯誤：
+ * 程式新增了規則、migration 卻忘了跑。那種情況下 migration 不會報錯，
+ * 要等到隔天早上排程實際寫入否決紀錄時才 403/400 ——
+ * 而排程對 picks 那一步設了 continue-on-error，整條管線仍是綠燈，
+ * 只有那天沒有觀察榜。與 2026-08-19 LINE 靜默失效是同一種故障形狀。
+ *
+ * 這裡逐一拿 RULE_SPECS 裡的每個 rule_id 實際寫一次。
+ * 新增規則卻沒更新 constraint，這裡會當場紅燈。
+ */
+for (const [i, spec] of RULE_SPECS.entries()) {
+  await expectAccepted(`程式登記的規則「${spec.displayName}」資料庫也接受（${spec.id}）`, [
+    probeRow({ rule_id: spec.id, code: `__probe_rule_${i}` }),
+  ]);
+}
 
 await expectRejected(
   '沒有證據的否決（evidence 空白）',
