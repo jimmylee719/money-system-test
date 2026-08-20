@@ -29,10 +29,21 @@ DASHBOARD_PASSWORD=自己取一個，別跟其他密碼重複
 
 Supabase Dashboard → SQL Editor → 貼上全文 → Run。已經跑過的可以重跑，不會壞。
 
+**不確定跑到哪一支就直接問資料庫，不要靠回想：**
+
+```bash
+npm run db:status
+```
+
+它會逐支檢查表與欄位在不在，並標出「只跑了一半」的情況（那最危險——
+看起來跑過了，其實 SQL 中途出錯）。所有 migration 都寫成可重複執行，重跑不會壞。
+
 | 檔案 | 內容 |
 |---|---|
 | `supabase/migrations/0001` ～ `0012` | 已完成 |
 | `supabase/migrations/0013_daily_picks_quote.sql` | **尚未執行** —— 未執行前 `l1:picks --write` 會寫入失敗 |
+
+（2026-08-20 以 `npm run db:status` 實測：0001–0012 皆已執行，僅 0013 待執行。）
 
 ### (2b) 憑證要設在**三個**不同的地方，各設一次
 
@@ -251,6 +262,7 @@ npm run llm:worker -- --write
 
 | 指令 | 驗什麼 |
 |---|---|
+| `npm run db:status` | 每支 migration 跑了沒（直接問資料庫，不看紀錄） |
 | `npm test` | 全部單元測試 |
 | `npm run typecheck` | TypeScript strict |
 | `npm run l0:verify` | raw_snapshots 三道鎖 |
