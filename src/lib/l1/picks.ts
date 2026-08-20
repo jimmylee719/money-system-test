@@ -31,6 +31,11 @@ export interface DailyPickRow {
   readonly composite_score: number;
   readonly real_factor_count: number;
   readonly factor_scores: unknown;
+  /** 以下四個是當日行情細節，不參與排序，只為日後畫面能說明漲跌 */
+  readonly change_amount: number | null;
+  readonly change_note: string | null;
+  readonly volume_shares: number | null;
+  readonly turnover_value: number | null;
   readonly engine_version: string;
   readonly active_factors: readonly string[];
   readonly inactive_factors: unknown;
@@ -113,6 +118,10 @@ export function buildPickRows(input: BuildPickRowsInput): readonly DailyPickRow[
       market: stock.market,
       name: stock.name,
       price_at_push: stock.close,
+      change_amount: stock.change,
+      change_note: stock.changeNote,
+      volume_shares: stock.volumeShares,
+      turnover_value: stock.turnoverValue,
       composite_score: stock.compositeScore,
       real_factor_count: stock.realFactorCount,
       factor_scores: stock.factorScores,

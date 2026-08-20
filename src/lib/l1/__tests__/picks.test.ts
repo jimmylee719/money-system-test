@@ -12,6 +12,11 @@ function stock(code: string, close: number): RankedStock {
     compositeScore: 0.9,
     realFactorCount: 3,
     factorScores: [],
+    // 排序無關，僅供顯示；預設不帶行情細節
+    change: null,
+    changeNote: null,
+    volumeShares: null,
+    turnoverValue: null,
   };
 }
 

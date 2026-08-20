@@ -16,6 +16,7 @@
 import type { RankedStock, RankingResult } from '../../l1/factors/engine';
 import type { ApprovedSignal, RiskResult } from '../../l3/engine';
 import type { VetoResult } from '../../l2/types';
+import { PLAIN_FACTORS, explainFactors, formatLots, formatPrice, priceMove } from '../explain';
 
 export interface DailyReportInput {
   readonly dataAsOf: string;
@@ -109,13 +110,25 @@ function watchlistBlock(input: DailyReportInput): readonly string[] {
 
   for (const [i, s] of input.watchlist.entries()) {
     const market = MARKET_LABEL[s.market] ?? s.market;
+    const move = priceMove(s.close, s.change, s.changeNote);
+
+    lines.push('', `${i + 1}. ${s.code} ${s.name}（${market}）`);
+    lines.push(`　收盤 ${formatPrice(s.close)}　${move.text}`);
+    lines.push(`　昨收 ${formatPrice(move.prevClose)}　成交 ${formatLots(s.volumeShares)}`);
+
+    // 上榜理由 = 這四個數字排在前面。只列真的算得出來的，補值不顯示。
+    for (const f of explainFactors(s.factorScores)) {
+      lines.push(`　· ${f.label} ${f.valueText}`);
+    }
+
     lines.push(
-      `${i + 1}. ${s.code} ${s.name}（${market}）${s.close}`,
-      `　　分數 ${s.compositeScore.toFixed(3)}　因子 ${s.realFactorCount}/${input.ranking.activeFactors.length}`,
+      `　分數 ${s.compositeScore.toFixed(3)}` +
+        `（${s.realFactorCount}/${input.ranking.activeFactors.length} 項有資料）`,
     );
+
     const blocked = blockedBy.get(s.code);
     if (blocked !== undefined) {
-      lines.push(`　　⛔ 已被 L2 擋下：${blocked.join('、')}`);
+      lines.push(`　⛔ 已被 L2 擋下：${blocked.join('、')}`);
     }
   }
   return lines;
@@ -136,20 +149,47 @@ function systemBlock(input: DailyReportInput): readonly string[] {
   }
   const multiRuleCount = [...hitsPerCode.values()].filter((n) => n > 1).length;
 
+  // 規則觸發總次數。與「被擋檔數」是兩個不同的量，畫面上要能對得起來。
+  const ruleHits = Object.values(veto.countsByRule).reduce((a, b) => a + b, 0);
+
+  // 【一項一行，由寬到窄】
+  // 舊版四行擠在一起，看不出彼此的關係。這四個數字其實是一條漏斗：
+  // 全市場 → 有資料可排序 → 扣掉官方標記的異常股 → 扣掉風控擋下的 = 今天能做的。
+  // 把順序與各自的意思講明，才知道 0 檔是卡在哪一關。
   const lines = [
     '',
     '━━━ 系統狀態 ━━━',
-    `排序池 ${ranking.rankedCount.toLocaleString()} 檔`,
-    // 【為什麼括號裡的數字加起來會大於前面那個】
-    // 前者是「幾檔被擋」，後者是「幾次規則觸發」。同一檔可能既是注意股又變更交易。
-    // 兩個數字都對，但擺在一起看起來像算錯，所以差額要明講。
-    // （2026-08-19：51 檔 vs 處置13＋注意17＋變更23＝53，就是這個情況。）
-    `L2 擋下 ${vetoedCodes.size} 檔${counts === '' ? '' : `（${counts}）`}` +
-      (multiRuleCount > 0 ? `　其中 ${multiRuleCount} 檔踩到多條` : ''),
-    `L3 核准 ${risk.approved.length} 檔`,
+    '每天逐層過濾，由寬到窄：',
+    '',
+    `① 排序池　${ranking.rankedCount.toLocaleString()} 檔`,
+    '　今天資料齊全、算得出分數的股票',
+    '',
+    `② L2 擋下　${vetoedCodes.size} 檔`,
   ];
+
+  if (counts !== '') {
+    lines.push(`　${counts}`);
+  }
+  // 【為什麼分項加起來會大於被擋檔數】
+  // 前者是「幾次規則觸發」，後者是「幾檔被擋」。同一檔可能既是注意股又變更交易。
+  // 兩個數字都對，但擺在一起看起來像算錯，所以差額要明講。
+  if (multiRuleCount > 0) {
+    lines.push(`　${multiRuleCount} 檔同時踩到多條，故分項合計 ${ruleHits} 大於 ${vetoedCodes.size}`);
+  }
+  lines.push('　這些是官方公告的異常股，一律不進交易訊號');
+  lines.push('');
+  lines.push(`③ L3 核准　${risk.approved.length} 檔`);
+  lines.push('　再通過部位、換手、曝險上限後，真正可執行的數量');
   if (ranking.inactiveFactors.length > 0) {
-    lines.push(`停用因子 ${ranking.inactiveFactors.length}／${ranking.activeFactors.length + ranking.inactiveFactors.length}`);
+    const total = ranking.activeFactors.length + ranking.inactiveFactors.length;
+    lines.push('');
+    lines.push(`④ 停用因子　${ranking.inactiveFactors.length}／${total}`);
+    // 逐一列出是哪個因子、為什麼停 —— 只寫「1／5」等於沒說。
+    for (const f of ranking.inactiveFactors) {
+      const label = PLAIN_FACTORS[f.factorKey]?.label ?? f.factorKey;
+      lines.push(`　${label}：${f.reason}`);
+    }
+    lines.push('　停用的因子不計分，其餘因子照常排序');
   }
   return lines;
 }

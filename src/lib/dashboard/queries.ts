@@ -11,6 +11,7 @@
 
 import 'server-only';
 
+import type { FactorScore } from '../l1/factors/engine';
 import { latestRevisions } from '../l2/llm/gold';
 
 /** 探針列的過濾條件（各表的探針標記方式不同） */
@@ -59,7 +60,17 @@ export interface PickRow {
   readonly price_at_push: string;
   readonly composite_score: string;
   readonly real_factor_count: number;
+  /** 每個因子的原始值與是否為補值。畫面用來說明「為什麼上榜」。 */
+  readonly factor_scores: readonly FactorScore[];
   readonly active_factors: readonly string[];
+  /**
+   * 以下四個為 0013 新增的當日行情細節。
+   * 既有列（2026-08-19 以前）一律為 null —— append-only，當時沒記就是沒記，不回填。
+   */
+  readonly change_amount: string | null;
+  readonly change_note: string | null;
+  readonly volume_shares: number | null;
+  readonly turnover_value: string | null;
   readonly inactive_factors: readonly { factorKey: string; reason: string }[];
   readonly ranked_count: number;
   readonly entry_price: string | null;

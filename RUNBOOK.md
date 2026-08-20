@@ -32,6 +32,7 @@ Supabase Dashboard → SQL Editor → 貼上全文 → Run。已經跑過的可�
 | 檔案 | 內容 |
 |---|---|
 | `supabase/migrations/0001` ～ `0012` | 已完成 |
+| `supabase/migrations/0013_daily_picks_quote.sql` | **尚未執行** —— 未執行前 `l1:picks --write` 會寫入失敗 |
 
 ### (2b) 憑證要設在**三個**不同的地方，各設一次
 

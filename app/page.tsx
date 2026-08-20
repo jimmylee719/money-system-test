@@ -10,6 +10,14 @@
  */
 
 import { loadDashboard } from '../src/lib/dashboard/queries';
+// 顯示規則與 LINE 日報共用同一支 —— 兩邊各寫各的，正是這幾天所有矛盾的來源。
+import {
+  PLAIN_FACTORS,
+  explainFactors,
+  formatLots,
+  formatPrice,
+  priceMove,
+} from '../src/lib/l4/explain';
 import type { OutcomeRow, PickRow } from '../src/lib/dashboard/queries';
 
 export const dynamic = 'force-dynamic';
@@ -202,41 +210,143 @@ export default async function Page() {
                   <th className="py-2">#</th>
                   <th>代號</th>
                   <th>名稱</th>
+                  <th className="text-right">昨收</th>
                   <th className="text-right">收盤</th>
+                  <th className="text-right">漲跌</th>
+                  <th className="text-right">成交</th>
                   <th className="text-right">合成分數</th>
-                  <th className="text-right">真實因子</th>
                   <th className="text-right">L2</th>
                 </tr>
               </thead>
               <tbody className="font-mono">
-                {watchlist.map((w: PickRow) => (
-                  <tr key={w.code} className="border-b border-neutral-900">
-                    <td className="py-2">{w.rank}</td>
-                    <td>{w.code}</td>
-                    <td className="font-sans">
-                      {w.name}
-                      <span className="ml-1 text-xs text-neutral-500">
-                        {MARKET[w.market] ?? w.market}
-                      </span>
-                    </td>
-                    <td className="text-right">{num(w.price_at_push)}</td>
-                    <td className="text-right">{num(w.composite_score, 4)}</td>
-                    <td className="text-right">
-                      {w.real_factor_count}/{w.active_factors.length}
-                    </td>
-                    <td className="text-right">
-                      {vetoedCodes.has(w.code) ? (
-                        <span className="text-amber-300">擋下</span>
-                      ) : (
-                        <span className="text-neutral-600">通過</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {watchlist.map((w: PickRow) => {
+                  // 【?? 而不是 === null】
+                  // 0013 尚未執行時，PostgREST 回來的列根本沒有這些鍵，值是 undefined。
+                  // 用 === null 判斷會漏掉 undefined，接著 Number(undefined) 得到 NaN，
+                  // 畫面就會顯示「昨收 NaN」。Dashboard 一 push 就重新佈署，
+                  // 一定會有一段時間先於 migration，所以這裡必須擋得住。
+                  const rawChange = w.change_amount ?? null;
+                  const move = priceMove(
+                    Number(w.price_at_push),
+                    rawChange === null ? null : Number(rawChange),
+                    w.change_note ?? null,
+                  );
+                  return (
+                    <tr key={w.code} className="border-b border-neutral-900">
+                      <td className="py-2">{w.rank}</td>
+                      <td>{w.code}</td>
+                      <td className="font-sans">
+                        {w.name}
+                        <span className="ml-1 text-xs text-neutral-500">
+                          {MARKET[w.market] ?? w.market}
+                        </span>
+                      </td>
+                      <td className="text-right text-neutral-400">
+                        {formatPrice(move.prevClose)}
+                      </td>
+                      <td className="text-right">{formatPrice(move.close)}</td>
+                      <td
+                        className={`text-right ${
+                          move.arrow === '▲'
+                            ? 'text-red-300'
+                            : move.arrow === '▼'
+                              ? 'text-emerald-300'
+                              : 'text-neutral-500'
+                        }`}
+                      >
+                        {move.text}
+                      </td>
+                      <td className="text-right text-neutral-400">
+                        {formatLots(w.volume_shares ?? null)}
+                      </td>
+                      <td className="text-right">{num(w.composite_score, 4)}</td>
+                      <td className="text-right">
+                        {vetoedCodes.has(w.code) ? (
+                          <span className="text-amber-300">擋下</span>
+                        ) : (
+                          <span className="text-neutral-600">通過</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
+      </Section>
+
+      {/*
+        ── 上榜理由 ──
+        2026-08-20 使用者回饋：「讓一般人一看也能夠了解這股票漲或跌是因為發生什麼事」。
+        這裡只列出**已登記因子的原始值**，那是這檔排進前五名的全部依據。
+
+        ⚠️ 這是「為什麼它排名靠前」，不是「為什麼它今天漲」。
+        兩者不可混為一談 —— 因子取的是昨天以前的資料，今天的漲跌另有原因，
+        本系統沒有能力也不打算解釋當日漲跌。硬要解釋就是編故事。
+      */}
+      {watchlist.length > 0 && (
+        <Section
+          title="為什麼這五檔上榜"
+          date={data.latestDate}
+          note="這些是排名的全部依據。⚠️ 這是「為什麼排名靠前」，不是「為什麼今天漲跌」——本系統不解釋當日漲跌，那需要的資料我們沒有。"
+        >
+          <div className="space-y-3">
+            {watchlist.map((w: PickRow) => {
+              const factors = explainFactors(w.factor_scores ?? []);
+              return (
+                <div key={w.code} className="rounded border border-neutral-800 bg-neutral-900/50 p-4">
+                  <div className="mb-2 text-sm text-neutral-200">
+                    <span className="font-mono">{w.rank}. {w.code}</span> {w.name}
+                    <span className="ml-2 font-mono text-xs text-neutral-500">
+                      分數 {num(w.composite_score, 4)}　{w.real_factor_count}/
+                      {w.active_factors.length} 項有資料
+                    </span>
+                  </div>
+                  {factors.length === 0 ? (
+                    <p className="text-sm text-neutral-500">
+                      本列沒有留存因子明細（2026-08-19 以前的紀錄）。
+                    </p>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
+                      {factors.map((f) => (
+                        <div key={f.factorKey} className="flex justify-between text-sm">
+                          <span className="text-neutral-400">
+                            {f.label}
+                            <span className="ml-1 text-xs text-neutral-600">
+                              （{f.betterWhen === 'higher' ? '越高越前面' : '越低越前面'}）
+                            </span>
+                          </span>
+                          <span className="font-mono text-neutral-100">{f.valueText}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Section>
+      )}
+
+      {/* ── 名詞解釋 ── 每個因子在講什麼，用白話講一次 */}
+      <Section
+        title="名詞解釋"
+        note="上面那些數字各自是什麼意思。這些定義在因子登記時就鎖住，事後不得調整。"
+      >
+        <dl className="space-y-3">
+          {Object.entries(PLAIN_FACTORS).map(([key, plain]) => (
+            <div key={key} className="rounded border border-neutral-800 bg-neutral-900/50 p-4">
+              <dt className="text-sm font-semibold text-neutral-100">
+                {plain.label}
+                <span className="ml-2 text-xs font-normal text-neutral-500">
+                  {plain.betterWhen === 'higher' ? '數字越高排名越前面' : '數字越低排名越前面'}
+                </span>
+              </dt>
+              <dd className="mt-1 text-sm text-neutral-400">{plain.meaning}</dd>
+            </div>
+          ))}
+        </dl>
       </Section>
 
       {/* ── G3 對照 ── */}

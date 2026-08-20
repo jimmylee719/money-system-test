@@ -13,21 +13,41 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { RankedStock, RankingResult } from '../../l1/factors/engine';
+import type { FactorScore, RankedStock, RankingResult } from '../../l1/factors/engine';
 import type { RiskResult } from '../../l3/engine';
 import type { VetoDecision, VetoResult } from '../../l2/types';
 import { buildDailyReport } from '../line/report';
 import type { DailyReportInput } from '../line/report';
 
-function stock(code: string, name: string, score: number): RankedStock {
+function stock(
+  code: string,
+  name: string,
+  score: number,
+  quote: Partial<Pick<RankedStock, 'close' | 'change' | 'changeNote' | 'volumeShares' | 'factorScores'>> = {},
+): RankedStock {
   return {
     code,
     market: 'TWSE',
     name,
-    close: 100,
+    close: quote.close ?? 100,
     compositeScore: score,
     realFactorCount: 4,
-    factorScores: [],
+    factorScores: quote.factorScores ?? [],
+    change: quote.change ?? null,
+    changeNote: quote.changeNote ?? null,
+    volumeShares: quote.volumeShares ?? null,
+    turnoverValue: null,
+  };
+}
+
+function factorScore(factorKey: string, rawValue: number | null, imputed = false): FactorScore {
+  return {
+    factorKey,
+    direction: 'higher_is_better',
+    rawValue,
+    winsorizedValue: rawValue,
+    score: 0.5,
+    imputed,
   };
 }
 
@@ -173,8 +193,8 @@ describe('擋下檔數與規則次數對不起來時要說明', () => {
         failedClosed: false,
       },
     });
-    expect(text).toContain('L2 擋下 2 檔');
-    expect(text).toContain('其中 1 檔踩到多條');
+    expect(text).toContain('② L2 擋下　2 檔');
+    expect(text).toContain('1 檔同時踩到多條，故分項合計 3 大於 2');
   });
 
   it('一檔踩三條時算 1 檔，不是 2 檔 —— 減法會算錯，這裡釘住', () => {
@@ -190,9 +210,9 @@ describe('擋下檔數與規則次數對不起來時要說明', () => {
         failedClosed: false,
       },
     });
-    expect(text).toContain('L2 擋下 1 檔');
-    expect(text).toContain('其中 1 檔踩到多條');
-    expect(text).not.toContain('其中 2 檔');
+    expect(text).toContain('② L2 擋下　1 檔');
+    expect(text).toContain('1 檔同時踩到多條，故分項合計 3 大於 1');
+    expect(text).not.toContain('2 檔同時踩到多條');
   });
 
   it('沒有人踩多條時不加那句廢話', () => {
@@ -204,8 +224,8 @@ describe('擋下檔數與規則次數對不起來時要說明', () => {
         failedClosed: false,
       },
     });
-    expect(text).toContain('L2 擋下 2 檔');
-    expect(text).not.toContain('踩到多條');
+    expect(text).toContain('② L2 擋下　2 檔');
+    expect(text).not.toContain('同時踩到多條');
   });
 });
 
@@ -241,5 +261,148 @@ describe('0 檔要分清楚是哪一種 0', () => {
     expect(text).toContain('今日 0 檔');
     expect(text).toContain('0 檔是正常且健康的');
     expect(text).not.toContain('資料還不夠');
+  });
+});
+
+/**
+ * 2026-08-20 使用者回饋：「Line 收到的訊息我看不太懂」。
+ * 要求補上昨收、今收、漲跌、成交量，並把系統狀態一項一行講清楚。
+ *
+ * 這一組釘住的是「不能為了好看而編造」：
+ * 除權息日不得反推昨收、補值因子不得當成公司的數字顯示。
+ */
+describe('觀察榜要看得懂：昨收、今收、漲跌、成交量', () => {
+  const s = stock('2542', '興富發', 0.972, {
+    close: 48.15,
+    change: 0.4,
+    volumeShares: 13_205_723,
+  });
+
+  it('顯示今日收盤與漲跌金額、漲跌幅', () => {
+    const text = build({ watchlist: [s] });
+    expect(text).toContain('收盤 48.15');
+    expect(text).toContain('▲0.40');
+    expect(text).toContain('+0.84%');
+  });
+
+  it('昨收由今收減漲跌反推，不另外去查', () => {
+    expect(build({ watchlist: [s] })).toContain('昨收 47.75');
+  });
+
+  it('成交量以「張」顯示，來源是股數', () => {
+    // 13,205,723 股 ÷ 1000 = 13,206 張
+    expect(build({ watchlist: [s] })).toContain('成交 13,206 張');
+  });
+
+  it('下跌時用 ▼ 並顯示負的漲跌幅', () => {
+    const down = stock('6213', '聯茂', 0.9, { close: 484, change: -4 });
+    const text = build({ watchlist: [down] });
+    expect(text).toContain('▼4.00');
+    expect(text).toContain('-0.82%');
+  });
+
+  it('除權息日不得反推昨收 —— 那天的漲跌不是跟昨收比的', () => {
+    const ex = stock('1101', '台泥', 0.9, { close: 30, change: null, changeNote: '除息' });
+    const text = build({ watchlist: [ex] });
+    expect(text).toContain('除息');
+    expect(text).toContain('不可與昨收直接比較');
+    expect(text).toContain('昨收 —');
+    expect(text).not.toContain('昨收 30');
+  });
+
+  it('沒有成交量資料時顯示破折號，不顯示 0 張', () => {
+    const noVol = stock('9999', '測試', 0.9, { close: 10, change: 0 });
+    const text = build({ watchlist: [noVol] });
+    expect(text).toContain('成交 —');
+    expect(text).not.toContain('成交 0 張');
+  });
+
+  it('平盤說「平盤」，不寫成看起來像負號的 —0.00', () => {
+    const flat = stock('9946', '三發地產', 0.9, { close: 18.85, change: 0, volumeShares: 227_000 });
+    const text = build({ watchlist: [flat] });
+    expect(text).toContain('收盤 18.85　平盤');
+    expect(text).toContain('昨收 18.85');
+    expect(text).not.toContain('—0.00');
+  });
+
+  it('收盤與昨收的小數位數一致，不會一個 166.5 一個 160.00', () => {
+    const s2 = stock('4961', '天鈺', 0.9, { close: 166.5, change: 6.5 });
+    const text = build({ watchlist: [s2] });
+    expect(text).toContain('收盤 166.50');
+    expect(text).toContain('昨收 160.00');
+  });
+});
+
+describe('觀察榜要說明「為什麼上榜」', () => {
+  const withFactors = stock('2542', '興富發', 0.972, {
+    close: 48.15,
+    change: 0.4,
+    factorScores: [
+      factorScore('rev_yoy_momentum_v1', 202.646),
+      factorScore('foreign_net_buy_ratio_v1', 0.0960786),
+      factorScore('margin_balance_change_v1', -0.025641),
+    ],
+  });
+
+  it('用白話標籤而不是 factorKey', () => {
+    const text = build({ watchlist: [withFactors] });
+    expect(text).toContain('月營收年增 +202.6%');
+    expect(text).toContain('外資買超 佔成交量 +9.6%');
+    expect(text).toContain('融資餘額 -2.6%');
+    expect(text).not.toContain('rev_yoy_momentum_v1');
+  });
+
+  it('補值的因子一律不顯示 —— 那是系統的假設，不是公司的數字', () => {
+    const imputed = stock('3090', '日電貿', 0.9, {
+      close: 161.5,
+      change: 1,
+      factorScores: [
+        factorScore('rev_yoy_momentum_v1', 50),
+        factorScore('trust_net_buy_ratio_v1', 0.5, true),
+      ],
+    });
+    const text = build({ watchlist: [imputed] });
+    expect(text).toContain('月營收年增 +50.0%');
+    expect(text).not.toContain('投信買超');
+  });
+});
+
+describe('系統狀態要一項一行、看得出是一條漏斗', () => {
+  const veto: VetoResult<RankedStock> = {
+    passed: [],
+    vetoed: [
+      decision('1111', 'attention'),
+      decision('1111', 'disposition'),
+      decision('2222', 'altered_trading'),
+    ],
+    countsByRule: { attention: 1, disposition: 1, altered_trading: 1 },
+    failedClosed: false,
+  };
+
+  it('四個項目各自成行並編號', () => {
+    const text = build({ veto });
+    expect(text).toContain('① 排序池');
+    expect(text).toContain('② L2 擋下');
+    expect(text).toContain('③ L3 核准');
+    expect(text).toContain('④ 停用因子');
+  });
+
+  it('每一項都附一句說明它是什麼', () => {
+    const text = build({ veto });
+    expect(text).toContain('今天資料齊全、算得出分數的股票');
+    expect(text).toContain('官方公告的異常股');
+    expect(text).toContain('真正可執行的數量');
+  });
+
+  it('分項合計大於被擋檔數時，把差額的來源講明', () => {
+    const text = build({ veto });
+    expect(text).toContain('② L2 擋下　2 檔');
+    expect(text).toContain('1 檔同時踩到多條，故分項合計 3 大於 2');
+  });
+
+  it('停用因子要寫出是哪一個、為什麼，不能只寫 1／5', () => {
+    const text = build({ veto });
+    expect(text).toContain('五日漲跌：交易日不足');
+    expect(text).not.toMatch(/停用因子\s*1／5\s*\n\s*\n/u);
   });
 });

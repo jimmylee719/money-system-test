@@ -265,6 +265,20 @@ export interface RankedStock {
   /** 實際算得出來的因子數（不含補值） */
   readonly realFactorCount: number;
   readonly factorScores: readonly FactorScore[];
+
+  /**
+   * 【以下四個欄位不參與排序，純粹為了讓人看得懂】
+   * 排序完全由 compositeScore 決定，這些只是把當日行情原封不動帶下去，
+   * 讓日報與 Dashboard 能顯示「漲了多少、成交多少」而不必再查一次資料。
+   *
+   * ⚠️ changeNote 不可丟棄。除權息日的 change 是相對於除權息參考價，
+   * 不是相對於昨天的收盤價 —— 此時 close − change **不等於**前一交易日收盤。
+   * 丟掉這個註記，畫面就會理直氣壯地顯示一個錯的「昨收」。
+   */
+  readonly change: number | null;
+  readonly changeNote: string | null;
+  readonly volumeShares: number | null;
+  readonly turnoverValue: number | null;
 }
 
 export interface InactiveFactor {
@@ -428,6 +442,10 @@ export function rankUniverse(
       compositeScore: active.length === 0 ? NEUTRAL_SCORE : sum / active.length,
       realFactorCount: realCount,
       factorScores,
+      change: quote.change,
+      changeNote: quote.changeNote,
+      volumeShares: quote.volumeShares,
+      turnoverValue: quote.turnoverValue,
     });
   }
 
