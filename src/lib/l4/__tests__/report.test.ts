@@ -16,7 +16,8 @@ import { describe, expect, it } from 'vitest';
 import type { FactorScore, RankedStock, RankingResult } from '../../l1/factors/engine';
 import type { RiskResult } from '../../l3/engine';
 import type { VetoDecision, VetoResult } from '../../l2/types';
-import { buildDailyReport } from '../line/report';
+import { RULE_SHORT, buildDailyReport } from '../line/report';
+import { RULE_SPECS } from '../../l2/rules';
 import type { DailyReportInput } from '../line/report';
 
 function stock(
@@ -404,5 +405,38 @@ describe('系統狀態要一項一行、看得出是一條漏斗', () => {
     const text = build({ veto });
     expect(text).toContain('五日漲跌：交易日不足');
     expect(text).not.toMatch(/停用因子\s*1／5\s*\n\s*\n/u);
+  });
+});
+
+/**
+ * 2026-08-20 實際發生：新增 margin_suspension 規則後忘了補中文標籤，
+ * 日報上出現「處置13 margin_suspension16 注意16」。
+ * 數字是對的，但一般人看不懂那是什麼。
+ */
+describe('每一條否決規則都要有中文短標籤', () => {
+  it('RULE_SPECS 裡的每個規則都在 RULE_SHORT 有對應', () => {
+    const missing = RULE_SPECS.map((s) => s.id).filter((id) => RULE_SHORT[id] === undefined);
+    // source_unavailable 與 llm_material_news 也必須有，因為它們同樣會出現在計數裡
+    expect(missing).toEqual([]);
+  });
+
+  it('標籤都是中文，不會漏成 factorKey 那樣的英文代號', () => {
+    for (const [id, label] of Object.entries(RULE_SHORT)) {
+      expect(label, `${id} 的標籤`).not.toMatch(/^[a-z_]+$/u);
+      expect(label.length, `${id} 的標籤`).toBeGreaterThan(0);
+    }
+  });
+
+  it('停資停券在日報上顯示為「停券」而不是 margin_suspension', () => {
+    const text = build({
+      veto: {
+        passed: [],
+        vetoed: [decision('1111', 'margin_suspension')],
+        countsByRule: { margin_suspension: 1 },
+        failedClosed: false,
+      },
+    });
+    expect(text).toContain('停券1');
+    expect(text).not.toContain('margin_suspension');
   });
 });

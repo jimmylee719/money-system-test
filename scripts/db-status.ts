@@ -150,6 +150,14 @@ const MIGRATIONS: readonly Migration[] = [
       () => probeColumn('daily_picks', 'volume_shares'),
     ],
   },
+  {
+    file: '0014_veto_margin_suspension',
+    what: 'L2 允許停資停券否決規則',
+    probes: [],
+    undetectable:
+      'check constraint 的內容 REST 讀不到。驗證方式：npm run l2:verify，' +
+      '或直接跑 npm run l1:picks -- --write（含停資停券否決時會寫入 veto_events）。',
+  },
 ];
 
 console.log('=== migration 執行狀態（直接問資料庫，不看任何紀錄）===\n');

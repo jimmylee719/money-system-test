@@ -1123,6 +1123,333 @@ export const EXRIGHT_SOURCES: readonly SourceDescriptor[] = [
   TPEX_EXRIGHT_DAILY,
 ];
 
+
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// P11.15：擴充公部門來源（2026-08-20 逐一實測，欄位照 API 實際回傳抄錄）
+//
+// 【這一批的定位】
+// 除了停資停券直接進 L2 之外，其餘**只累積不使用**。
+// 因子必須在看到結果之前登記，而檢定需要歷史 —— 現在不抓，P12 一樣沒得檢定；
+// 但若在看過 2026-08 觀察榜的表現之後才挑因子，那就是前視偏誤。
+// 兩難的解法是：資料現在存，因子等 P12 依規矩登記。
+//
+// 【v1 因子上限 5 個已滿，本批不新增任何因子】
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 停資停券預告。
+ *
+ * ⚠️ **payload 沒有「資料日期」欄位**。StartDate／EndDate 是停券的**生效期間**，
+ * 不是這份 payload 的產生日 —— 拿它當 data_as_of 會把「8/27 開始停券」記成
+ * 「這份資料是 8/27 的」，語意完全不同。故 dateField 留空，
+ * data_as_of 如實記為 null、原因 date_field_missing。
+ *
+ * 【為什麼這個要進 L2】
+ * 停資停券直接抽掉一檔股票的槓桿資金。原因欄常見「股價波動過度劇烈」，
+ * 那正是我們不想在此時進場的狀態。與處置／注意股同屬官方已公告的事實，
+ * 可回溯、可驗證，符合 L2「只能否決」與「須附官方原文」的要求。
+ */
+export const TWSE_MARGIN_SUSPENSION: SourceDescriptor = {
+  id: 'twse_margin_suspension',
+  url: 'https://openapi.twse.com.tw/v1/exchangeReport/BFI84U',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  market: 'TWSE',
+  sourceTier: 'official_primary',
+  description: '集中市場停資停券預告表',
+  usedBy: 'P11.15 L2 否決層（停資停券期間不進場）',
+  verifiedAt: '2026-08-20',
+  payloadShape: 'json_array',
+  /** 空字串＝此 payload 沒有資料日期欄位（見上方說明），不是漏填 */
+  dateField: '',
+  dateFormat: 'roc_compact',
+  dateSelection: 'unique',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: ['Code', 'Name', 'StartDate', 'EndDate', 'Reason'],
+};
+
+/**
+ * 發行量加權股價報酬指數（含息）。
+ *
+ * 【為什麼要它，明明已經有 0050】
+ * 0050 是 ETF，有折溢價、有管理費、有追蹤誤差。
+ * 這支是交易所自己算的**含息**市場報酬，是更乾淨的基準。
+ * 兩個都留：0050 代表「你真的買得到的東西」，報酬指數代表「市場本身」。
+ * G3 判準不因此放寬 —— 多一個對照組只會讓標準更難達成，不會更容易。
+ *
+ * 一次回傳近 13 個交易日的滾動視窗，故 dateSelection 為 max。
+ */
+export const TWSE_TAIEX_TOTAL_RETURN: SourceDescriptor = {
+  id: 'twse_taiex_total_return',
+  url: 'https://openapi.twse.com.tw/v1/indicesReport/MFI94U',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  market: 'TWSE',
+  sourceTier: 'official_primary',
+  description: '發行量加權股價報酬指數（含息）',
+  usedBy: 'P11.15 G3 市場基準（與 0050 併列對照）',
+  verifiedAt: '2026-08-20',
+  payloadShape: 'json_array',
+  dateField: 'Date',
+  dateFormat: 'roc_compact',
+  /** 一次回傳近 13 個交易日，非單日快照 */
+  dateSelection: 'max',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: ['Date', 'TAIEXTotalReturnIndex'],
+};
+
+/**
+ * 上市上櫃股票當日可借券賣出股數。
+ *
+ * 【為什麼補這個】
+ * 台股的機構放空主要走**借券**不走融券。只看融券餘額，等於漏掉法人的空單。
+ * 一份只有散戶空單的空方圖像，會系統性低估真實的賣壓。
+ *
+ * ⚠️ 同一份 payload 同時含上市（TWSECode）與上櫃（GRETAICode）兩組欄位，
+ *    且**沒有日期欄位** —— 與 twse_margin_balance 同樣的處理方式。
+ * ⚠️ 官方欄位名 GRETAI 是櫃買中心的舊英文名（GreTai Securities Market），照抄不改。
+ */
+export const TWSE_SBL_AVAILABLE: SourceDescriptor = {
+  id: 'twse_sbl_available',
+  url: 'https://openapi.twse.com.tw/v1/SBL/TWT96U',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  market: 'TWSE',
+  sourceTier: 'official_primary',
+  description: '上市上櫃股票當日可借券賣出股數',
+  usedBy: 'P12 因子候選（空方部位）—— 目前只累積，不使用',
+  verifiedAt: '2026-08-20',
+  payloadShape: 'json_array',
+  /** 空字串＝此 payload 沒有日期欄位，不是漏填 */
+  dateField: '',
+  dateFormat: 'roc_compact',
+  dateSelection: 'unique',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: ['TWSECode', 'TWSEAvailableVolume', 'GRETAICode', 'GRETAIAvailableVolume'],
+};
+
+/**
+ * 上市公司營益分析彙總表（毛利率／營業利益率／稅前純益率／稅後純益率）。
+ *
+ * 【為什麼這個重要】
+ * 我們現在有「月營收年增率」因子，但營收成長不等於賺錢 ——
+ * 營收暴增而毛利率同時崩跌，是賠本搶單。只看營收會被騙，這是那個故事的另一半。
+ *
+ * ⚠️ **資料期間是「年度」＋「季別」兩個欄位**（實測：年度=115、季別=2），
+ *    而 SourcePeriodFormat 目前只支援單一欄位的 roc_year_month，表達不了「季」。
+ *    故 periodField 宣告為 null —— **不是漏填，是這個規格現在表達不了**。
+ *    原始 payload 完整保留兩欄，P12 實際使用時由 L1 讀取並明確記錄推導過程。
+ *    在那之前不假裝 data_period 有值。
+ * ⚠️ 欄位名含算式與括號，照抄不簡化。
+ */
+export const TWSE_PROFITABILITY: SourceDescriptor = {
+  id: 'twse_profitability',
+  url: 'https://openapi.twse.com.tw/v1/opendata/t187ap17_L',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  market: 'TWSE',
+  sourceTier: 'official_primary',
+  description: '上市公司營益分析彙總表（毛利率／營益率／純益率）',
+  usedBy: 'P12 因子候選（獲利品質）—— 目前只累積，不使用',
+  verifiedAt: '2026-08-20',
+  payloadShape: 'json_array',
+  dateField: '出表日期',
+  dateFormat: 'roc_compact',
+  dateSelection: 'unique',
+  /** 期間是「年度＋季別」兩欄，現行規格表達不了「季」，故留 null（見上方說明） */
+  periodField: null,
+  periodFormat: null,
+  baselineFields: [
+    '出表日期',
+    '年度',
+    '季別',
+    '公司代號',
+    '公司名稱',
+    '營業收入(百萬元)',
+    '毛利率(%)(營業毛利)/(營業收入)',
+    '營業利益率(%)(營業利益)/(營業收入)',
+    '稅前純益率(%)(稅前純益)/(營業收入)',
+    '稅後純益率(%)(稅後純益)/(營業收入)',
+  ],
+};
+
+/**
+ * 上市公司董監事持股餘額明細（含設質股數與設質比例）。
+ *
+ * 【台股特有的風險指標，美股沒有對應物】
+ * 董監把持股拿去質押借錢，股價下跌到一定程度會被要求補繳保證金；
+ * 補不出來就會被斷頭賣出，而賣出又進一步壓低股價 ——
+ * **那是一個會自我強化的下跌螺旋**。高質押比例的個股在下跌時特別危險。
+ *
+ * ⚠️ 官方欄位「選任時持股 」**結尾帶一個空格**，照抄不修正
+ *    （與 TWSE 重大訊息的「主旨 」是同一類情形）。
+ * ⚠️ 27,528 列，是目前所有來源中最大的一支。
+ */
+export const TWSE_DIRECTOR_HOLDINGS: SourceDescriptor = {
+  id: 'twse_director_holdings',
+  url: 'https://openapi.twse.com.tw/v1/opendata/t187ap11_L',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  market: 'TWSE',
+  sourceTier: 'official_primary',
+  description: '上市公司董監事持股餘額明細（含設質比例）',
+  usedBy: 'P12 因子候選與 L2 風險旗標（董監質押）—— 目前只累積，不使用',
+  verifiedAt: '2026-08-20',
+  payloadShape: 'json_array',
+  dateField: '出表日期',
+  dateFormat: 'roc_compact',
+  dateSelection: 'unique',
+  periodField: '資料年月',
+  periodFormat: 'roc_year_month',
+  baselineFields: [
+    '出表日期',
+    '資料年月',
+    '公司代號',
+    '公司名稱',
+    '職稱',
+    '姓名',
+    '選任時持股 ',
+    '目前持股',
+    '設質股數',
+    '設質股數佔持股比例',
+    '內部人關係人目前持股合計',
+    '內部人關係人設質股數',
+    '內部人關係人設質比例',
+  ],
+};
+
+/**
+ * 各類指數收盤行情（實測 273 個指數，含加權指數、半導體、金融保險等類股指數）。
+ *
+ * 【為什麼專業交易員一定看類股】
+ * 個股報酬有相當比例來自所屬類股與大盤，不是個股本身。
+ * 強勢股在崩跌的類股裡照樣被拖下去。只看個股不看類股，等於少看一半的資訊。
+ *
+ * ⚠️ 官方把**漲跌方向與幅度拆成兩欄**：「漲跌」是符號（實測為減號），
+ *    「漲跌點數」是絕對值。兩欄必須一起讀，只讀點數會把跌當成漲。
+ */
+export const TWSE_SECTOR_INDICES: SourceDescriptor = {
+  id: 'twse_sector_indices',
+  url: 'https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  market: 'TWSE',
+  sourceTier: 'official_primary',
+  description: '每日收盤行情——各類指數（實測 273 個）',
+  usedBy: 'P12 因子候選（類股相對強弱）—— 目前只累積，不使用',
+  verifiedAt: '2026-08-20',
+  payloadShape: 'json_array',
+  dateField: '日期',
+  dateFormat: 'roc_compact',
+  dateSelection: 'unique',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: ['日期', '指數', '收盤指數', '漲跌', '漲跌點數', '漲跌百分比', '特殊處理註記'],
+};
+
+/**
+ * 集中市場每日成交資訊（成交量、成交金額、筆數、加權指數）。
+ *
+ * 【用途】市場整體活絡程度。個股成交量要放在大盤量能的脈絡下看 ——
+ * 全市場都在縮量時，個股「量縮」不代表這檔特別冷清。
+ * 另外此處的 TAIEX 是**價格指數**，與 twse_taiex_total_return 的含息指數不同，
+ * 兩者相減即為配息貢獻，不可混用。
+ *
+ * 一次回傳近 13 個交易日的滾動視窗，故 dateSelection 為 max。
+ */
+export const TWSE_MARKET_TURNOVER: SourceDescriptor = {
+  id: 'twse_market_turnover',
+  url: 'https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  market: 'TWSE',
+  sourceTier: 'official_primary',
+  description: '集中市場每日成交資訊（量、值、筆數、加權指數）',
+  usedBy: 'P12 因子候選（量能脈絡）—— 目前只累積，不使用',
+  verifiedAt: '2026-08-20',
+  payloadShape: 'json_array',
+  dateField: 'Date',
+  dateFormat: 'roc_compact',
+  /** 一次回傳近 13 個交易日，非單日快照 */
+  dateSelection: 'max',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: ['Date', 'TradeVolume', 'TradeValue', 'Transaction', 'TAIEX', 'Change'],
+};
+
+/**
+ * 期貨每日交易行情（實測 2,357 列，含台指期各月份與各商品）。
+ *
+ * 【期現價差是台股特有的重要指標】
+ * 台指期收盤低於加權指數（逆價差）代表法人在避險或看空後市。
+ * 美股看 futures basis 與 term structure，台股的逆價差訊號更直接，
+ * 因為台指期的法人參與度高而散戶投機成分相對可辨識。
+ *
+ * ⚠️ **日期格式是西元壓縮（實測 20260819），不是民國** ——
+ *    與 TWSE 那一批不同，期交所用西元。宣告錯會整批解析失敗。
+ * ⚠️ 欄位名含百分號與括號，照抄不簡化。
+ */
+export const TAIFEX_DAILY_FUTURES: SourceDescriptor = {
+  id: 'taifex_daily_futures',
+  url: 'https://openapi.taifex.com.tw/v1/DailyMarketReportFut',
+  dateFrom: null,
+  endpointStability: 'documented_openapi',
+  market: 'TAIFEX',
+  sourceTier: 'official_primary',
+  description: '期貨每日交易行情（含未平倉與結算價）',
+  usedBy: 'P12 因子候選（期現價差）—— 目前只累積，不使用',
+  verifiedAt: '2026-08-20',
+  payloadShape: 'json_array',
+  dateField: 'Date',
+  /** 期交所用西元壓縮，與 TWSE 的民國不同 */
+  dateFormat: 'ad_compact',
+  dateSelection: 'unique',
+  periodField: null,
+  periodFormat: null,
+  baselineFields: [
+    'Date',
+    'Contract',
+    'ContractMonth(Week)',
+    'Open',
+    'High',
+    'Low',
+    'Last',
+    'Change',
+    '%',
+    'Volume',
+    'SettlementPrice',
+    'OpenInterest',
+    'BestBid',
+    'BestAsk',
+    'HistoricalHigh',
+    'HistoricalLow',
+    'TradingHalt',
+    'TradingSession',
+    'Volume(ExecutionsAmongSpreadOrderAndSingleOrderOnly)',
+  ],
+};
+
+/**
+ * P11.15 擴充來源。分成獨立一組，因為它們的使用狀態與其他組不同：
+ * 只有 twse_margin_suspension 進 L2，其餘七個目前**只累積不使用**。
+ * 混進既有分組會讓「哪些已在用」變得看不出來。
+ */
+export const EXTENDED_SOURCES: readonly SourceDescriptor[] = [
+  TWSE_MARGIN_SUSPENSION,
+  TWSE_TAIEX_TOTAL_RETURN,
+  TWSE_SBL_AVAILABLE,
+  TWSE_PROFITABILITY,
+  TWSE_DIRECTOR_HOLDINGS,
+  TWSE_SECTOR_INDICES,
+  TWSE_MARKET_TURNOVER,
+  TAIFEX_DAILY_FUTURES,
+];
+
 export const ALL_SOURCES: readonly SourceDescriptor[] = [
   ...QUOTE_SOURCES,
   ...MOPS_SOURCES,
@@ -1130,8 +1457,13 @@ export const ALL_SOURCES: readonly SourceDescriptor[] = [
   ...CHIP_SOURCES,
   ...TRADING_STATUS_SOURCES,
   ...EXRIGHT_SOURCES,
+  ...EXTENDED_SOURCES,
 ];
 
+/**
+ * 註冊表放在檔案最後：所有描述子皆為 const，沒有提升，
+ * 放在前面會 TS2448（used before its declaration）。
+ */
 export const SOURCES_BY_ID: Readonly<Record<SourceId, SourceDescriptor>> = {
   twse_stock_day_all: TWSE_STOCK_DAY_ALL,
   twse_bwibbu_all: TWSE_BWIBBU_ALL,
@@ -1161,4 +1493,13 @@ export const SOURCES_BY_ID: Readonly<Record<SourceId, SourceDescriptor>> = {
   twse_exright_forecast: TWSE_EXRIGHT_FORECAST,
   tpex_exright_forecast: TPEX_EXRIGHT_FORECAST,
   tpex_exright_daily: TPEX_EXRIGHT_DAILY,
+  // P11.15：擴充公部門來源（僅停資停券進 L2，其餘只累積）
+  twse_margin_suspension: TWSE_MARGIN_SUSPENSION,
+  twse_taiex_total_return: TWSE_TAIEX_TOTAL_RETURN,
+  twse_sbl_available: TWSE_SBL_AVAILABLE,
+  twse_profitability: TWSE_PROFITABILITY,
+  twse_director_holdings: TWSE_DIRECTOR_HOLDINGS,
+  twse_sector_indices: TWSE_SECTOR_INDICES,
+  twse_market_turnover: TWSE_MARKET_TURNOVER,
+  taifex_daily_futures: TAIFEX_DAILY_FUTURES,
 };

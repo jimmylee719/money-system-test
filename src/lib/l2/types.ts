@@ -28,6 +28,20 @@ export type VetoRuleId =
   /** 變更交易方法（全額交割）／分盤交易／管理股票／停止交易 */
   | 'altered_trading'
   /**
+   * P11.15：停資停券期間涵蓋訊號日。
+   *
+   * 【與前四條的關鍵差別：這一條不 fail-closed】
+   * 前四條擋的是「這檔現在不能正常交易」——不知道就不能進場。
+   * 這一條擋的是融資融券被停，而 CLAUDE.md 明文禁止本系統使用融資融券，
+   * 所以它**不影響我們的執行能力**，只是交易所在說「這檔波動過度劇烈」。
+   *
+   * 一個次級指標不該握有「整天停機」的權力：
+   * 若 BFI84U 端點掛掉就全面否決，等於讓一個我們根本不用的市場機制
+   * 決定今天有沒有訊號。故來源缺漏時**放行**（見 engine.ts 的 availability），
+   * 但只要清單上有這一檔且期間涵蓋訊號日，就否決。
+   */
+  | 'margin_suspension'
+  /**
    * P11：本機 LLM 讀重大訊息原文後判定的負面事件。
    *
    * ⚠️ 這一條與其他四條性質不同，必須分開衡量：
@@ -65,6 +79,25 @@ export interface DispositionRow {
   readonly reason: string;
   /** 處置措施（如「第一次處置」「人工管制撮合」）。上櫃無此欄位時為空字串。 */
   readonly measure: string;
+}
+
+/**
+ * 停資停券預告（TWSE BFI84U）。
+ *
+ * ⚠️ payload 只有 Code／Name／StartDate／EndDate／Reason 五欄，
+ *    **沒有資料日期** —— StartDate／EndDate 是停券的生效期間，不是公告日。
+ */
+export interface MarginSuspensionRow {
+  readonly code: string;
+  readonly market: L1Market;
+  /** 停資停券起日（ISO）。無法解析時為 null。 */
+  readonly periodStart: string | null;
+  /** 停資停券迄日（ISO） */
+  readonly periodEnd: string | null;
+  /** 官方期間原文，逐字保留以便稽核 */
+  readonly periodRaw: string;
+  /** 官方原因原文，逐字保留不改寫 */
+  readonly reason: string;
 }
 
 /** 暫停交易 */

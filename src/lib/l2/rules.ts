@@ -16,7 +16,12 @@
  */
 
 import type { DispositionRow, VetoDecision, VetoRuleId } from './types';
-import type { AlteredTradingRow, AttentionRow, SuspensionRow } from './types';
+import type {
+  AlteredTradingRow,
+  AttentionRow,
+  MarginSuspensionRow,
+  SuspensionRow,
+} from './types';
 
 /** 規則的自我說明，會連同否決紀錄一起留存 */
 export interface VetoRuleSpec {
@@ -61,6 +66,18 @@ export const RULE_SPECS: readonly VetoRuleSpec[] = [
     confidence: 'suspected',
   },
   {
+    id: 'margin_suspension',
+    displayName: '停資停券期間',
+    rationale:
+      '交易所停資停券的原因實測多為「股價波動過度劇烈」，那是交易所自己認定這檔目前不正常。' +
+      '本系統不使用融資融券，故停券不影響我們的執行能力；擋它的理由是：' +
+      '被認定波動過度的股票，其波動率估計本身就不可信，而我們用波動率算停損。' +
+      '另外停券會抽掉市場槓桿資金、迫使融資戶平倉，那個賣壓與我們的進場理由無關。' +
+      '**此條刻意不 fail-closed**：來源缺漏時放行，不讓一個我們根本不用的市場機制' +
+      '決定今天有沒有訊號。',
+    confidence: 'suspected',
+  },
+  {
     id: 'llm_material_news',
     displayName: '重大訊息負面事件（本機 LLM 判讀）',
     rationale:
@@ -94,6 +111,11 @@ export interface VetoContext {
   readonly disposition: ReadonlyMap<string, readonly DispositionRow[]>;
   readonly suspension: ReadonlyMap<string, SuspensionRow>;
   readonly alteredTrading: ReadonlyMap<string, AlteredTradingRow>;
+  /**
+   * P11.15 停資停券。同一檔可能有多筆不同期間的公告，故為陣列。
+   * 來源缺漏時傳空 Map —— 這一條刻意不 fail-closed，理由見 types.ts 的 margin_suspension。
+   */
+  readonly marginSuspension: ReadonlyMap<string, readonly MarginSuspensionRow[]>;
 }
 
 // ── 個別規則 ─────────────────────────────────────────────────────────────────
@@ -180,6 +202,51 @@ export function checkAttention(code: string, ctx: VetoContext): VetoDecision | n
 }
 
 /**
+ * P11.15：停資停券期間涵蓋訊號日即否決。
+ *
+ * 【為什麼要擋，明明我們不用融資融券】
+ * 交易所停資停券的原因欄實測多為「股價波動過度劇烈」——
+ * 那是交易所自己在說這檔目前不正常。我們不用槓桿，但我們用波動率算停損；
+ * 一檔被交易所認定波動過度的股票，其波動率估計本身就不可信。
+ *
+ * 更直接的理由：停資停券會抽掉市場上的槓桿資金，融資戶被迫平倉，
+ * 那個賣壓與我們的進場理由無關，純粹是制度造成的。
+ *
+ * 【與其他四條的差別：來源缺漏時不 fail-closed】
+ * 見 types.ts 的 margin_suspension。這裡只處理「清單拿得到」的情況。
+ *
+ * 【但期間解析失敗仍然否決】
+ * 那只影響清單上真的有的那一檔，不會造成全面停機，
+ * 且符合「只減不增」——查不到期間就等於不知道現在是否停券中。
+ */
+export function checkMarginSuspension(code: string, ctx: VetoContext): VetoDecision | null {
+  const rows = ctx.marginSuspension.get(code);
+  if (rows === undefined || rows.length === 0) {
+    return null;
+  }
+
+  for (const row of rows) {
+    if (row.periodStart === null || row.periodEnd === null) {
+      return {
+        code,
+        ruleId: 'margin_suspension',
+        reason: '有停資停券公告但期間無法解析，無法確認是否仍在停券中',
+        evidence: `期間原文「${row.periodRaw}」／原因「${row.reason}」`,
+      };
+    }
+    if (row.periodStart <= ctx.signalDate && ctx.signalDate <= row.periodEnd) {
+      return {
+        code,
+        ruleId: 'margin_suspension',
+        reason: `停資停券期間 ${row.periodStart} ~ ${row.periodEnd} 涵蓋訊號日`,
+        evidence: `原因「${row.reason}」／期間原文「${row.periodRaw}」`,
+      };
+    }
+  }
+  return null;
+}
+
+/**
  * 全部規則，依「把握程度」由高到低排列。
  * 同一檔可能觸發多條，全部都會被記錄，不會只留第一條。
  */
@@ -188,4 +255,5 @@ export const VETO_CHECKS: readonly ((code: string, ctx: VetoContext) => VetoDeci
   checkDisposition,
   checkAlteredTrading,
   checkAttention,
+  checkMarginSuspension,
 ];

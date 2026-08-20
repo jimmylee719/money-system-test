@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { ExRightEvent } from '../../l5/exright';
 import {
   BENCHMARK_CODE,
+  buildOfficialIndex,
+  normalizeTaiexTotalReturn,
   benchmarkReturn,
   buildTotalReturnIndex,
   maxDrawdown,
@@ -242,5 +244,78 @@ describe('觀察榜 vs 交易訊號分開比較', () => {
   it('樣本不足時不做任何解讀', () => {
     const result = compareSplit(make(5, 3), make(5, 3), 5);
     expect(result.interpretation).toContain('無法判斷');
+  });
+});
+
+/**
+ * P11.15：官方加權股價報酬指數（MFI94U）。
+ *
+ * 最重要的一則是「不再做除權息還原」—— 這個指數本身已含息，
+ * 對它套用 0050 那套配息加回的邏輯會把股利算兩次。
+ */
+describe('normalizeTaiexTotalReturn / buildOfficialIndex', () => {
+  const SNAP = [
+    { Date: '1150818', TAIEXTotalReturnIndex: '38,000.00' },
+    { Date: '1150819', TAIEXTotalReturnIndex: '38,380.00' },
+  ];
+
+  it('民國日期轉 ISO，千分位逗號去掉', () => {
+    const out = normalizeTaiexTotalReturn(SNAP);
+    expect(out).toEqual([
+      { date: '2026-08-18', value: 38000 },
+      { date: '2026-08-19', value: 38380 },
+    ]);
+  });
+
+  it('日期或數值壞掉的列略過，不猜也不拋錯', () => {
+    const out = normalizeTaiexTotalReturn([
+      { Date: 'x', TAIEXTotalReturnIndex: '1' },
+      { Date: '1150819', TAIEXTotalReturnIndex: 'N/A' },
+      { Date: '1150819', TAIEXTotalReturnIndex: '0' },
+      { Date: '1150820', TAIEXTotalReturnIndex: '100' },
+    ]);
+    expect(out).toEqual([{ date: '2026-08-20', value: 100 }]);
+  });
+
+  it('不是陣列時回空', () => {
+    expect(normalizeTaiexTotalReturn(null)).toEqual([]);
+    expect(normalizeTaiexTotalReturn({ a: 1 })).toEqual([]);
+  });
+
+  it('起始日正規化為 100，比值正確', () => {
+    const index = buildOfficialIndex([normalizeTaiexTotalReturn(SNAP)]);
+    expect(index[0]?.totalReturnIndex).toBeCloseTo(100, 10);
+    expect(index[1]?.totalReturnIndex).toBeCloseTo(101, 10);
+  });
+
+  it('多份滾動視窗快照合併後日期唯一且遞增', () => {
+    const a = normalizeTaiexTotalReturn(SNAP);
+    const b = normalizeTaiexTotalReturn([{ Date: '1150817', TAIEXTotalReturnIndex: '37000' }]);
+    const index = buildOfficialIndex([a, b]);
+    expect(index.map((p) => p.date)).toEqual(['2026-08-17', '2026-08-18', '2026-08-19']);
+    expect(index[0]?.totalReturnIndex).toBeCloseTo(100, 10);
+  });
+
+  /**
+   * 官方若事後修正歷史值，我們取**最早抓到**的那一份。
+   * 用後來修正的數字回頭評估當時的決策就是前視偏誤。
+   */
+  it('同一天在多份快照中值不同時，取先出現的那一份', () => {
+    const first = [{ date: '2026-08-19', value: 100 }];
+    const later = [{ date: '2026-08-19', value: 999 }];
+    expect(buildOfficialIndex([first, later])[0]?.close).toBe(100);
+  });
+
+  it('指數已含息，故配息欄恆為 0 —— 不可再做除權息還原', () => {
+    const index = buildOfficialIndex([normalizeTaiexTotalReturn(SNAP)]);
+    for (const p of index) {
+      expect(p.cashDividend).toBe(0);
+      expect(p.stockDividendRatio).toBe(0);
+    }
+  });
+
+  it('空輸入回空陣列，不會算出 NaN', () => {
+    expect(buildOfficialIndex([])).toEqual([]);
+    expect(buildOfficialIndex([[]])).toEqual([]);
   });
 });

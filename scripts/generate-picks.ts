@@ -53,6 +53,7 @@ import {
   normalizeTwseAlteredTrading,
   normalizeTwseAttention,
   normalizeTwseDisposition,
+  normalizeTwseMarginSuspension,
   normalizeTwseSuspension,
 } from '../src/lib/l2/normalize';
 import { applyLlmVetoes } from '../src/lib/l2/llm/apply';
@@ -302,7 +303,7 @@ console.log(
 //
 // L2 套用在**整個排序池**而不是只有前幾名：全記錄才能回答
 // 「被擋掉的是前段班還是後段班」。擋掉後段班沒什麼，擋掉前段班才是成本。
-const [twseAtt, tpexAtt, twseDisp, tpexDisp, twseSusp, tpexSusp, twseAlt, tpexAlt] =
+const [twseAtt, tpexAtt, twseDisp, tpexDisp, twseSusp, tpexSusp, twseAlt, tpexAlt, twseMgnSusp] =
   await Promise.all([
     loader.latest('twse_attention'),
     loader.latest('tpex_attention'),
@@ -312,6 +313,8 @@ const [twseAtt, tpexAtt, twseDisp, tpexDisp, twseSusp, tpexSusp, twseAlt, tpexAl
     loader.latest('tpex_suspended'),
     loader.latest('twse_altered_trading'),
     loader.latest('tpex_altered_trading'),
+    // P11.15 停資停券。**不列入 availability** —— 這一條不 fail-closed。
+    loader.latest('twse_margin_suspension'),
   ]);
 
 /**
@@ -375,6 +378,28 @@ const alteredRows = [
   ...normalizeTwseAlteredTrading(twseAlt?.payload).rows,
   ...normalizeTpexAlteredTrading(tpexAlt?.payload).rows,
 ];
+
+/**
+ * P11.15 停資停券。
+ *
+ * 【與上面四組刻意不同的兩點】
+ * 1. **不進 availability**：來源缺漏時不 fail-closed。停資停券擋的是融資融券，
+ *    而 CLAUDE.md 明文禁止本系統使用融資融券 —— 它不影響我們的執行能力。
+ *    讓一個我們根本不用的市場機制握有「整天停機」的權力是錯的。
+ * 2. 仍要求與行情同一次抓取：拿昨天的停券清單判斷今天，
+ *    會把已經結束的停券當成還在停券中。取不到就當作今天沒有停券公告。
+ */
+const marginSuspensionUsable = l2SourceUsable(
+  twseMgnSusp,
+  'twse_margin_suspension（payload 無日期欄位；缺漏不 fail-closed）',
+  false,
+);
+const marginSuspensionRows = marginSuspensionUsable
+  ? normalizeTwseMarginSuspension(twseMgnSusp?.payload).rows
+  : [];
+if (!marginSuspensionUsable) {
+  console.log('  · 停資停券來源不可用 → 本日不套用此規則（刻意不 fail-closed，非故障）');
+}
 
 console.log(
   `  公告筆數：注意 ${attentionRows.length}（其中 ${staleAttentionCount(attentionRows, dataAsOf)} 列非訊號日已排除）｜處置 ${dispositionRows.length}｜` +
@@ -514,6 +539,7 @@ const vetoResult = applyVetoes(
     disposition: dispositionRows,
     suspension: suspensionRows,
     alteredTrading: alteredRows,
+    marginSuspension: marginSuspensionRows,
   }),
   availability,
 );

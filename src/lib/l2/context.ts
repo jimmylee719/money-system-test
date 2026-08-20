@@ -22,6 +22,7 @@ import type {
   AlteredTradingRow,
   AttentionRow,
   DispositionRow,
+  MarginSuspensionRow,
   SuspensionRow,
 } from './types';
 
@@ -120,6 +121,12 @@ export interface BuildVetoContextInput {
   readonly disposition: readonly DispositionRow[];
   readonly suspension: readonly SuspensionRow[];
   readonly alteredTrading: readonly AlteredTradingRow[];
+  /**
+   * P11.15 停資停券。**可省略** —— 這一條不 fail-closed，
+   * 來源缺漏時傳空陣列或不傳，等同「今天沒有任何停券公告」而非「無法判斷」。
+   * 其餘四個來源沒有這個待遇：缺一即全面否決。
+   */
+  readonly marginSuspension?: readonly MarginSuspensionRow[];
 }
 
 export function buildVetoContext(input: BuildVetoContextInput): VetoContext {
@@ -131,5 +138,8 @@ export function buildVetoContext(input: BuildVetoContextInput): VetoContext {
     disposition: groupByCode(input.disposition),
     suspension: indexByCode(input.suspension),
     alteredTrading: indexByCode(input.alteredTrading),
+    // 同一檔可能有多筆不同期間的停券公告，全部保留逐一比對。
+    // 未提供時視為「沒有任何停券公告」——這一條不 fail-closed。
+    marginSuspension: groupByCode(input.marginSuspension ?? []),
   };
 }

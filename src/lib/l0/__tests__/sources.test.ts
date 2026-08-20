@@ -10,17 +10,20 @@ import {
   SOURCES_BY_ID,
   TAIFEX_SOURCES,
   TRADING_STATUS_SOURCES,
+  EXTENDED_SOURCES,
 } from '../sources';
 
 describe('來源註冊表', () => {
-  it('包含行情 4 + MOPS 6 + TAIFEX 3 + 籌碼 4 + 交易狀態 8 + 除權息 3 個來源', () => {
+  it('包含行情 4 + MOPS 6 + TAIFEX 3 + 籌碼 4 + 交易狀態 8 + 除權息 3 + 擴充 8 個來源', () => {
     expect(QUOTE_SOURCES).toHaveLength(4);
     expect(MOPS_SOURCES).toHaveLength(6);
     expect(TAIFEX_SOURCES).toHaveLength(3);
     expect(CHIP_SOURCES).toHaveLength(4);
     expect(TRADING_STATUS_SOURCES).toHaveLength(8);
     expect(EXRIGHT_SOURCES).toHaveLength(3);
-    expect(ALL_SOURCES).toHaveLength(28);
+    // P11.15 新增：8 個公部門來源，僅停資停券進 L2，其餘只累積
+    expect(EXTENDED_SOURCES).toHaveLength(8);
+    expect(ALL_SOURCES).toHaveLength(36);
   });
 
   it('需要日期參數的來源，其日期提供者必須排在它前面', () => {
@@ -117,10 +120,21 @@ describe('來源註冊表', () => {
   });
 
   it('沒有日期欄位的來源僅限已知的例外', () => {
-    // 這三個的 payload 實測確實沒有日期欄位，不是漏填。
+    // 這幾個的 payload 實測確實沒有日期欄位，不是漏填。
     // 名單寫死是為了讓「又多一個沒日期的來源」必須經過人看過，不會靜默混進來。
+    //
+    // 2026-08-20 新增兩個，兩個都逐一確認過：
+    //   twse_margin_suspension —— 只有 StartDate／EndDate，那是停券的生效期間，
+    //     不是 payload 的產生日。拿它當 data_as_of 會把兩件事混為一談。
+    //   twse_sbl_available —— 四個欄位全是代號與可借券數量，完全沒有日期。
     const noDate = ALL_SOURCES.filter((s) => s.dateField === '').map((s) => s.id);
-    expect(noDate).toEqual(['twse_margin_balance', 'twse_suspended', 'twse_altered_trading']);
+    expect(noDate).toEqual([
+      'twse_margin_balance',
+      'twse_suspended',
+      'twse_altered_trading',
+      'twse_margin_suspension',
+      'twse_sbl_available',
+    ]);
   });
 
   it('periodField 與 periodFormat 必須成對出現，且欄位存在於基準欄位', () => {

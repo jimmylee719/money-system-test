@@ -28,6 +28,7 @@ const RULE: Record<string, string> = {
   disposition: '處置股',
   suspended: '暫停交易',
   altered_trading: '變更交易',
+  margin_suspension: '停資停券',
   source_unavailable: '資料缺漏',
 };
 

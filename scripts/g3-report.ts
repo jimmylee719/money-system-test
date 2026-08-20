@@ -22,6 +22,9 @@ import { groupByCode, mergeEvents, normalizeTwseExRight } from '../src/lib/l5/ex
 import { HORIZONS } from '../src/lib/l5/outcomes';
 import {
   BENCHMARK_CODE,
+  TAIEX_TOTAL_RETURN_CODE,
+  buildOfficialIndex,
+  normalizeTaiexTotalReturn,
   benchmarkReturn,
   buildTotalReturnIndex,
   maxDrawdown,
@@ -94,6 +97,35 @@ console.log(
 );
 if (index.length < 2) {
   console.log('（只有一天，尚無法計算報酬與回撤）');
+}
+
+/**
+ * P11.15：官方加權股價報酬指數（含息），作為第二個市場基準。
+ *
+ * 【為什麼要兩個】
+ * 0050 是 ETF，衡量「你真的買得到的東西」（含折溢價、管理費、追蹤誤差）；
+ * 官方指數衡量「市場本身」。輸給 0050 與輸給市場是兩件不同的事，
+ * 分不開就不知道問題出在選股還是出在那檔 ETF。
+ *
+ * ⚠️ **這個指數本身已含息**，不再做除權息還原 —— 再加一次就是把股利算兩次。
+ * ⚠️ G3 判準仍以 CLAUDE.md 寫的 0050 為主，這個是補充，不放寬標準。
+ */
+const taiexSnapshots = await loader.recentDays('twse_taiex_total_return', HISTORY_DAYS);
+const taiexIndex = buildOfficialIndex(
+  taiexSnapshots.map((snapshot) => normalizeTaiexTotalReturn(snapshot.payload)),
+);
+if (taiexIndex.length >= 2) {
+  const tFirst = taiexIndex[0]!;
+  const tLast = taiexIndex[taiexIndex.length - 1]!;
+  const tReturn = (tLast.totalReturnIndex / tFirst.totalReturnIndex - 1) * 100;
+  console.log(
+    `加權股價報酬指數（含息，官方）（${tFirst.date} ~ ${tLast.date}）：` +
+      `總報酬 ${tReturn.toFixed(2)}%｜最大回撤 ${(maxDrawdown(taiexIndex) * 100).toFixed(2)}%`,
+  );
+} else {
+  console.log(
+    `加權股價報酬指數：目前累積 ${taiexIndex.length} 個交易日，尚不足以計算報酬。`,
+  );
 }
 
 const barsByDate = new Map(bars.map((b) => [b.date, b]));
@@ -191,12 +223,38 @@ const fresh = index
     computed_at: computedAt,
   }));
 
-if (fresh.length === 0) {
+// 官方含息指數同樣寫入，代號不同故互不影響
+const existingTaiex = await select<{ date: string }>(
+  `benchmark_daily?code=eq.${TAIEX_TOTAL_RETURN_CODE}&select=date`,
+);
+const existingTaiexDates = new Set(existingTaiex.map((e) => e.date));
+const freshTaiex = taiexIndex
+  .filter((p) => !existingTaiexDates.has(p.date))
+  .map((p) => ({
+    code: TAIEX_TOTAL_RETURN_CODE,
+    date: p.date,
+    close: p.close,
+    // 指數本身已含息，故此二欄恆為 0 —— 不是「沒配息」，是「已經算在指數裡」
+    cash_dividend: 0,
+    stock_dividend_ratio: 0,
+    total_return_index: p.totalReturnIndex,
+    engine_version: BENCHMARK_ENGINE_VERSION,
+    computed_at: computedAt,
+  }));
+
+if (fresh.length === 0 && freshTaiex.length === 0) {
   console.log('\nbenchmark_daily 已是最新，無需寫入。');
   process.exit(0);
 }
 
-await client.insert('benchmark_daily', fresh);
-console.log(`\n✓ 已寫入 benchmark_daily：${fresh.length} 列`);
+if (fresh.length > 0) {
+  await client.insert('benchmark_daily', fresh);
+}
+if (freshTaiex.length > 0) {
+  await client.insert('benchmark_daily', freshTaiex);
+}
+console.log(
+  `\n✓ 已寫入 benchmark_daily：0050 ${fresh.length} 列｜加權報酬指數 ${freshTaiex.length} 列`,
+);
 console.log('  append-only，此後不可修改或刪除。');
 process.exit(0);

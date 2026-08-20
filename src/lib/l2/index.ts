@@ -19,6 +19,7 @@ export {
   normalizeTwseAlteredTrading,
   normalizeTwseAttention,
   normalizeTwseDisposition,
+  normalizeTwseMarginSuspension,
   normalizeTwseSuspension,
   parseDispositionPeriod,
 } from './normalize';

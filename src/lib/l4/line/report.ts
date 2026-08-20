@@ -194,11 +194,20 @@ function systemBlock(input: DailyReportInput): readonly string[] {
   return lines;
 }
 
-const RULE_SHORT: Readonly<Record<string, string>> = {
+/**
+ * 否決規則的短標籤。**每一條 VetoRuleId 都必須在這裡有一筆**，
+ * 否則日報上會出現 margin_suspension16 這種英文（2026-08-20 實際發生過）。
+ * report.test.ts 有一則對齊檢查，漏掉會當場失敗。
+ */
+export const RULE_SHORT: Readonly<Record<string, string>> = {
   attention: '注意',
   disposition: '處置',
   suspended: '暫停',
   altered_trading: '變更',
+  margin_suspension: '停券',
+  // 2026-08-20 由對齊測試抓到：這一條從 P11 就沒有標籤，
+  // 只是 LLM 層尚未上線所以沒人看見。上線那天才發現就太晚了。
+  llm_material_news: '重訊',
   source_unavailable: '資料缺',
 };
 

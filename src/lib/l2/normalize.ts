@@ -23,6 +23,7 @@ import type {
   AlteredTradingRow,
   AttentionRow,
   DispositionRow,
+  MarginSuspensionRow,
   SuspensionRow,
 } from './types';
 
@@ -308,6 +309,44 @@ export function normalizeTpexAlteredTrading(payload: unknown): NormalizedStatus<
         `變更交易=${text(r['AlteredTrading'])}／分盤=${text(r['PeriodicTrading'])}` +
         `／管理股票=${text(r['ManagedStock'])}／停止交易=${text(r['SuspensionOfTrading'])}` +
         `／撮合間隔=${text(r['MatchingFrequency'])}`,
+    });
+  }
+  return result(rows, raw.length, placeholders);
+}
+
+// ── 停資停券 ─────────────────────────────────────────────────────────────────
+
+/**
+ * TWSE BFI84U 停資停券預告表。
+ *
+ * 實測欄位（2026-08-20，96 列）：Code / Name / StartDate / EndDate / Reason。
+ * StartDate 與 EndDate 皆為民國壓縮（如 1150827），是停券的**生效期間**，
+ * 不是公告日 —— 這份 payload 沒有任何「資料日期」欄位。
+ *
+ * 原因欄實測值多為「股價波動過度劇烈」等交易所制式用語，逐字保留不改寫。
+ */
+export function normalizeTwseMarginSuspension(
+  payload: unknown,
+): NormalizedStatus<MarginSuspensionRow> {
+  const raw = asRows(payload);
+  const rows: MarginSuspensionRow[] = [];
+  let placeholders = 0;
+
+  for (const r of raw) {
+    const code = text(r['Code']);
+    if (code === '') {
+      placeholders += 1;
+      continue;
+    }
+    const start = text(r['StartDate']);
+    const end = text(r['EndDate']);
+    rows.push({
+      code,
+      market: 'TWSE',
+      periodStart: rocDateToIso(start),
+      periodEnd: rocDateToIso(end),
+      periodRaw: `${start}～${end}`,
+      reason: text(r['Reason']),
     });
   }
   return result(rows, raw.length, placeholders);
