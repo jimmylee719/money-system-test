@@ -218,6 +218,39 @@ await expectRejected(
 );
 await expectAccepted('　└ 對照組：同一列拿掉 id 就寫得進去', [probeRow({ rank: 3 })]);
 
+// ── 欄位級 INSERT 授權必須涵蓋每一個要寫的欄位 ──────────────────────────────
+//
+// 【為什麼這一則要單獨存在】
+// daily_picks 用的是**欄位級** INSERT 權限（0003 起）。
+// 欄位級 grant 不會自動涵蓋後來 ALTER 加上的欄位 —— 每次加欄位都必須
+// revoke 再重新 grant 一次完整清單（0008、0013 都做了這件事）。
+//
+// 漏掉的後果不是報錯在 migration，而是**隔天早上排程寫入時才 403**，
+// 而排程對 picks 這一步設了 continue-on-error，所以整條管線仍是綠燈，
+// 只有那天沒有觀察榜。這正是 2026-08-19 LINE 靜默失效的同一種故障形狀。
+//
+// 這一則寫入的欄位清單刻意與 buildPickRows 產生的一致：
+// 只要日後有人加了欄位卻忘了重新授權，這裡會立刻紅燈。
+await expectAccepted('新增欄位有被 grant 涵蓋（漏授權會等到隔天排程才 403）', [
+  probeRow({
+    rank: 4,
+    change_amount: -0.5,
+    change_note: null,
+    volume_shares: 1_000,
+    turnover_value: 1_000,
+  }),
+]);
+
+// 成交量不得為負：來源格式變了要當場失敗，不要靜默存進去
+await expectRejected(
+  '成交量為負（來源格式改變的徵兆）',
+  'POST',
+  'daily_picks',
+  [probeRow({ rank: 5, volume_shares: -1 })],
+  '23514',
+  'daily_picks_volume_nonneg_check',
+);
+
 // ── 唯一索引：同一天同一 revision 不得重複出榜 ──────────────────────────────
 await expectRejected(
   '同一天同一 revision 重複寫入同一名次（悄悄換掉今天的第 1 名）',
