@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { L0_ACCUMULATION_START, isAfterAccumulationStart } from '../../shared/calendar';
 import type { ExRightEvent } from '../../l5/exright';
 import {
   BENCHMARK_CODE,
@@ -317,5 +318,50 @@ describe('normalizeTaiexTotalReturn / buildOfficialIndex', () => {
   it('空輸入回空陣列，不會算出 NaN', () => {
     expect(buildOfficialIndex([])).toEqual([]);
     expect(buildOfficialIndex([[]])).toEqual([]);
+  });
+});
+
+/**
+ * 2026-08-22 實際事故：官方含息指數的滾動視窗回溯到 2026-08-03，
+ * 早於 L0 起算日，整批寫入被 benchmark_daily_no_backfill_check 擋下。
+ * 而排程那一步當時是 continue-on-error，於是連續兩天默默沒寫入。
+ *
+ * 修法是把來源裁到起算日之後，**不是放寬約束** —— 約束擋的正是它該擋的東西：
+ * 在我們開始記錄之前的任何一列，都不可能是當時真的看到的。
+ */
+describe('不得產生早於 L0 起算日的基準列', () => {
+  const SPAN = [
+    { Date: '1150803', TAIEXTotalReturnIndex: '100027.02' }, // 早於起算日
+    { Date: '1150813', TAIEXTotalReturnIndex: '101000.00' }, // 早於起算日
+    { Date: '1150814', TAIEXTotalReturnIndex: '102000.00' }, // 起算日當天
+    { Date: '1150821', TAIEXTotalReturnIndex: '100716.00' },
+  ];
+
+  it('起算日之前的列全部丟掉', () => {
+    const index = buildOfficialIndex([normalizeTaiexTotalReturn(SPAN)]);
+    expect(index.map((p) => p.date)).toEqual(['2026-08-14', '2026-08-21']);
+    for (const p of index) {
+      expect(p.date >= L0_ACCUMULATION_START).toBe(true);
+    }
+  });
+
+  it('基準日改為起算日當天，與 0050 對齊才能並排比較', () => {
+    const index = buildOfficialIndex([normalizeTaiexTotalReturn(SPAN)]);
+    expect(index[0]?.date).toBe(L0_ACCUMULATION_START);
+    expect(index[0]?.totalReturnIndex).toBeCloseTo(100, 10);
+    // 102000 → 100716 = -1.2588%
+    expect(index[1]?.totalReturnIndex).toBeCloseTo((100716 / 102000) * 100, 8);
+  });
+
+  it('全部都早於起算日時回空，而不是硬擠出一列', () => {
+    const early = [{ Date: '1150803', TAIEXTotalReturnIndex: '100000' }];
+    expect(buildOfficialIndex([normalizeTaiexTotalReturn(early)])).toEqual([]);
+  });
+
+  it('常數與資料庫的 no_backfill 約束一致', () => {
+    // 五張表的 check 都是 date >= '2026-08-14'，改了這裡就要改 migration
+    expect(L0_ACCUMULATION_START).toBe('2026-08-14');
+    expect(isAfterAccumulationStart('2026-08-13')).toBe(false);
+    expect(isAfterAccumulationStart('2026-08-14')).toBe(true);
   });
 });

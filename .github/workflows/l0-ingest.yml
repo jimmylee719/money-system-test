@@ -113,10 +113,19 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: npm run l5:outcomes -- --write
 
-      # 0050 基準指數。G3 的對照依據，每日累積一點。
-      - name: Update benchmark (0050)
+      # 市場基準（0050 與官方加權股價報酬指數）。G3 的對照依據，每日累積一點。
+      #
+      # 【2026-08-22 移除 continue-on-error，這是刻意的】
+      # 官方含息指數的滾動視窗回溯到 8/03，早於 L0 起算日，整批被
+      # benchmark_daily_no_backfill_check 擋下 —— 而這一步當時是 continue-on-error，
+      # 於是**連續兩天默默沒寫入**，整條管線照樣綠燈、日報照樣送出。
+      #
+      # 與 picks 那一步不同：picks 在非交易日因重複寫入而 exit 1 是**正常**的，
+      # 所以必須容許失敗。這一步沒有新資料時是 exit 0，
+      # 因此非零結束碼一律代表真的壞了 —— 那就該讓整個 run 紅燈、寄信通知。
+      # G5「連續 60 日零故障」本來就該把這種事算成故障。
+      - name: Update benchmark (0050 + 加權報酬指數)
         id: benchmark
-        continue-on-error: true
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

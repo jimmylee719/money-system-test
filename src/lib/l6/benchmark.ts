@@ -18,6 +18,7 @@
 import type { ExRightEvent } from '../l5/exright';
 import { adjustmentFor, totalReturn } from '../l5/exright';
 import { rocDateToIso } from '../l0/roc-date';
+import { isAfterAccumulationStart } from '../shared/calendar';
 
 /** CLAUDE.md 指定的基準：元大台灣50 */
 export const BENCHMARK_CODE = '0050';
@@ -185,6 +186,12 @@ export function buildOfficialIndex(
   const byDate = new Map<string, number>();
   for (const points of snapshots) {
     for (const p of points) {
+      // 早於 L0 起算日的一律丟掉。資料庫有 no_backfill 約束會擋，
+      // 但等到寫入才被擋，整批都寫不進去（2026-08-22 實際發生，連兩天默默沒寫）。
+      // 在這裡裁掉還有一個好處：正規化的基準日與 0050 對齊，兩條線可以並排看。
+      if (!isAfterAccumulationStart(p.date)) {
+        continue;
+      }
       if (!byDate.has(p.date)) {
         byDate.set(p.date, p.value);
       }
